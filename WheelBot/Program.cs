@@ -5,13 +5,13 @@ using WheelBot;
 
 CommandHandlers commandHandlers = new CommandHandlers();
 
-var config = new ConfigurationBuilder().AddUserSecrets<Program>().Build();
+var config = new ConfigurationBuilder().AddJsonFile("appsettings.json").AddUserSecrets<Program>().Build();
 
 var client = new DiscordSocketClient();
 
 client.SlashCommandExecuted += HandleCommandAsync;
 
-Console.WriteLine("trying to login to bot using token of length {0}", config["BotToken"].Length);
+Console.WriteLine("trying to login to bot using token of length {0}", config["BotToken"]?.Length);
 
 await client.LoginAsync(TokenType.Bot, config["BotToken"]);
 
