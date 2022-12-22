@@ -11,7 +11,7 @@ public sealed class WheelGenerator
     private readonly Color[] _colors = { Color.Red, Color.Orange, Color.Yellow, Color.Green, Color.Blue, Color.Purple };
     private readonly List<string> _options = new();
     private readonly Random _random = new Random();
-    private const int SIZE = 600;
+    private const int SIZE = 320;
 
     public bool HasOptions() => _options.Any();
     public List<string> Options => _options;
@@ -23,7 +23,7 @@ public sealed class WheelGenerator
         var rotation = CalculateRotation(selectedIndex, _options.Count);
 
         //await CreateAnimation(600, _colors, _options, "FullAnimation.gif");
-        var stream = await CreateAnimation(SIZE, _colors, _options, 360 + rotation, true);
+        var stream = await CreateAnimation(SIZE, _colors, _options, 360*2 + rotation, true);
 
         return new AnimatedWheel(selectedIndex, _options[selectedIndex], stream);
     }
@@ -122,7 +122,7 @@ public sealed class WheelGenerator
         sw.Start();
 
         // Loop to rotate the wheel and save each frame of the animation
-        for (int i = 0; i < rotation; i += 5)
+        for (int i = 0; i < rotation; i += 10)
         {
             // Clear the graphics object
             g.Clear(Color.Transparent);
@@ -145,6 +145,31 @@ public sealed class WheelGenerator
             frames.Add(newframe);
             Console.WriteLine(sw.ElapsedMilliseconds);
         }
+
+        if(true)
+        {
+            Console.WriteLine(rotation);
+            g.Clear(Color.Transparent);
+
+            // Create a rotated Matrix object
+            Matrix matrix = new Matrix();
+            matrix.RotateAt(rotation-5, new PointF(size / 2, size / 2));
+
+            // Set the current transformation matrix to the rotated Matrix
+            g.Transform = matrix;
+
+            // Draw the slices of the wheel
+            MakeWheel(size, g, colors, options);
+            // Reset the current transformation matrix
+            g.ResetTransform();
+
+            // Save the image to a file
+            Bitmap newframe = (Bitmap)bmp.Clone();
+            //newframe.Save($"wheel{i}.png", ImageFormat.Png);
+            frames.Add(newframe);
+            Console.WriteLine(sw.ElapsedMilliseconds);
+        }
+
         Console.WriteLine("After generating frames {0}", sw.ElapsedMilliseconds);
         // Create an empty list of MagickImage objects
         var images = new List<MagickImage>();
@@ -163,10 +188,12 @@ public sealed class WheelGenerator
         var animation = new MagickImageCollection(images);
 
         animation.Coalesce();
+        animation.OptimizePlus();
+
         Console.WriteLine("Converting frames {0}", sw.ElapsedMilliseconds);
         foreach (var image in animation)
         {
-            image.AnimationDelay = 2;
+            image.AnimationDelay = 3;
             image.AnimationIterations = stop ? 1 : -1;
         }
         Console.WriteLine("Converting frames {0}", sw.ElapsedMilliseconds);
@@ -177,6 +204,19 @@ public sealed class WheelGenerator
         Console.WriteLine("After saving to stream {0}", sw.ElapsedMilliseconds);
         sw.Stop();
         return stream;
+    }
+
+    public string RemoveOption(int value)
+    {
+        var removed = _options[value];
+        _options.RemoveAt(value);
+        return removed;
+    }
+
+    public string RemoveOption(string value)
+    {
+        _options.Remove(value);
+        return value;
     }
 }
 

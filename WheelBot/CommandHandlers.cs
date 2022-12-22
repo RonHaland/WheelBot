@@ -1,4 +1,5 @@
 ﻿using Discord.WebSocket;
+using Newtonsoft.Json.Linq;
 
 namespace WheelBot;
 
@@ -27,7 +28,7 @@ public sealed class CommandHandlers
         var animation = await _wheel.GenerateAnimation();
 		Console.WriteLine("generated wheel");
         await command.FollowupWithFileAsync(animation.SpinningAnimation, "FullAnimation.gif");
-		await Task.Delay(8000);
+		await Task.Delay(6000);
 		Console.WriteLine("modifying original message");
 		await command.ModifyOriginalResponseAsync(c => c.Content = animation.Result);
 		animation.SpinningAnimation.Close();
@@ -40,6 +41,52 @@ public sealed class CommandHandlers
         _wheel.AddOption(optionToAdd);
 		await command.RespondAsync($"{command.User.Username} added {optionToAdd} to the wheel!{Environment.NewLine}The full list of options is now ['{string.Join("', '", _wheel.Options)}']");
 	}
+	public async Task HandleRemove(SocketSlashCommand command)
+	{
+        if (!_wheel.HasOptions())
+        {
+            await command.RespondAsync("No options on the wheel, add options using the '/add' command");
+            return;
+        }
+		if (!command.Data.Options.Any())
+		{
+			await command.RespondAsync("Please add a parameter to indicate which option to delete");
+			return;
+		}
+		var option = command.Data.Options.First();
+		if (option.Name == "index")
+		{
+			var value = int.Parse(option.Value.ToString() ?? "");
+			if (value < 0 || value > _wheel.Options.Count)
+			{
+				await command.RespondAsync("index out of range");
+				return;
+			}
+
+            var removed = _wheel.RemoveOption(value);
+            await command.RespondAsync($"{command.User.Username} removed {removed} from the wheel!{Environment.NewLine}The full list of options is now ['{string.Join("', '", _wheel.Options)}']");
+		}
+		else
+		{
+            var removed = _wheel.RemoveOption(option.Value.ToString() ?? "");
+            await command.RespondAsync($"{command.User.Username} removed {removed} from the wheel!{Environment.NewLine}The full list of options is now ['{string.Join("', '", _wheel.Options)}']");
+        }
+
+    }
+
+	public async Task HandleRandomize(SocketSlashCommand command)
+    {
+        if (!_wheel.HasOptions())
+        {
+            await command.RespondAsync("No options on the wheel, add options using the '/add' command");
+            return;
+        }
+
+        _wheel.RandomizeOrder();
+        var stream = _wheel.CreatePreview();
+
+        await command.RespondWithFileAsync(stream, "preview.png", $"The new order of options is ['{string.Join("', '", _wheel.Options)}']");
+    }
 
 	public async Task HandlePreveiw(SocketSlashCommand command)
     {

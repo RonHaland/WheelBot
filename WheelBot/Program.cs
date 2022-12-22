@@ -3,17 +3,6 @@ using Discord.WebSocket;
 using Microsoft.Extensions.Configuration;
 using WheelBot;
 
-//var generator = new WheelGenerator();
-//generator.AddOption("CHug");
-//generator.AddOption("Chris");
-//generator.AddOption("Del ut 2");
-//generator.AddOption("Gutta drikker");
-//generator.AddOption("Drikk 1");
-//generator.RandomizeOrder();
-//var result = await generator.GenerateAnimation();
-
-//Console.WriteLine(result);
-
 CommandHandlers commandHandlers = new CommandHandlers();
 
 var config = new ConfigurationBuilder().AddUserSecrets<Program>().Build();
@@ -26,8 +15,8 @@ await client.LoginAsync(TokenType.Bot, config["BotToken"]);
 
 client.Ready += async () =>
 {
-    //var cmds = await client.GetGlobalApplicationCommandsAsync();
-    var cmds = new List<SocketApplicationCommand>();
+    var cmds = await client.GetGlobalApplicationCommandsAsync();
+    //var cmds = new List<SocketApplicationCommand>();
     if (!cmds.Any(c => c.Name == "spin"))
     {
         var command = new SlashCommandBuilder()
@@ -47,7 +36,9 @@ client.Ready += async () =>
     {
         var command = new SlashCommandBuilder()
             .WithName("rm")
-            .WithDescription("Removes an option from the wheel");
+            .WithDescription("Removes an option from the wheel")
+            .AddOption("index", ApplicationCommandOptionType.Integer, "Removes option at index")
+            .AddOption("option", ApplicationCommandOptionType.String, "Removes option matching text");
         await client.CreateGlobalApplicationCommandAsync(command.Build());
     }
     if (!cmds.Any(c => c.Name == "randomize"))
@@ -84,8 +75,10 @@ async Task HandleCommandAsync(SocketSlashCommand command)
             await commandHandlers.HandleAdd(command);
             break;
         case "rm":
+            await commandHandlers.HandleRemove(command);
             break;
         case "randomize":
+            await commandHandlers.HandleRandomize(command);
             break;
         case "preview":
             await commandHandlers.HandlePreveiw(command);
