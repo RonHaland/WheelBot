@@ -11,6 +11,8 @@ var client = new DiscordSocketClient();
 
 client.SlashCommandExecuted += HandleCommandAsync;
 
+Console.WriteLine("trying to login to bot using token of length {0}", config["BotToken"].Length);
+
 await client.LoginAsync(TokenType.Bot, config["BotToken"]);
 
 client.Ready += async () =>
@@ -58,6 +60,8 @@ client.Ready += async () =>
 };
 
 await client.StartAsync();
+
+Console.WriteLine("Bot is running");
 
 await Task.Delay(-1);
 
