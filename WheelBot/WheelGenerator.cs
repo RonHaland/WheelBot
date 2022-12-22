@@ -1,6 +1,8 @@
 ﻿using ImageMagick;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 
 namespace WheelBot;
 
@@ -9,20 +11,21 @@ public sealed class WheelGenerator
     private readonly Color[] _colors = { Color.Red, Color.Orange, Color.Yellow, Color.Green, Color.Blue, Color.Purple };
     private readonly List<string> _options = new();
     private readonly Random _random = new Random();
-    public async Task<string> GenerateAnimations()
-    {
-        if (_options.Count <= 0)
-            return "No Options :O";
+    private const int SIZE = 600;
 
+    public bool HasOptions() => _options.Any();
+    public List<string> Options => _options;
+
+    public async Task<AnimatedWheel> GenerateAnimation()
+    {
         var selectedIndex = _random.Next(_options.Count);
 
         var rotation = CalculateRotation(selectedIndex, _options.Count);
 
-        await CreateAnimation(600, _colors, _options, "FullAnimation.webp");
-        await CreateAnimation(600, _colors, _options, "SelectedOption.webp", 360 + rotation, true);
+        //await CreateAnimation(600, _colors, _options, "FullAnimation.gif");
+        var stream = await CreateAnimation(SIZE, _colors, _options, 360 + rotation, true);
 
-        return _options[selectedIndex];
-
+        return new AnimatedWheel(selectedIndex, _options[selectedIndex], stream);
     }
 
     public void RandomizeOrder()
@@ -91,19 +94,32 @@ public sealed class WheelGenerator
         }
     }
 
-    static IEnumerable<byte[]> ImagesToBytes(IEnumerable<Image> imgs)
+    static IEnumerable<byte[]?> ImagesToBytes(IEnumerable<Image> imgs)
     {
         ImageConverter converter = new ImageConverter();
-        return imgs.Select(i => (byte[])converter.ConvertTo(i, typeof(byte[])));
+        return imgs.Select(i => (byte[]?)converter.ConvertTo(i, typeof(byte[])));
     }
 
-    static async Task CreateAnimation(int size, Color[] colors, IList<string> options, string filename, int rotation = 360, bool stop = false)
+    public Stream CreatePreview()
+    {
+        Bitmap bmp = new Bitmap(SIZE, SIZE);
+        Graphics g = Graphics.FromImage(bmp);
+        MakeWheel(SIZE, g, _colors, _options);
+        MemoryStream stream = new();
+        bmp.Save(stream, ImageFormat.Png);
+        return stream;
+    }
+
+    static async Task<Stream> CreateAnimation(int size, Color[] colors, IList<string> options, int rotation = 360, bool stop = false)
     {
         Bitmap bmp = new Bitmap(size, size);
 
         // Create a new Graphics object to draw on the Bitmap
         Graphics g = Graphics.FromImage(bmp);
         List<Bitmap> frames = new();
+
+        Stopwatch sw = new();
+        sw.Start();
 
         // Loop to rotate the wheel and save each frame of the animation
         for (int i = 0; i < rotation; i += 5)
@@ -127,31 +143,53 @@ public sealed class WheelGenerator
             Bitmap newframe = (Bitmap)bmp.Clone();
             //newframe.Save($"wheel{i}.png", ImageFormat.Png);
             frames.Add(newframe);
+            Console.WriteLine(sw.ElapsedMilliseconds);
         }
-
+        Console.WriteLine("After generating frames {0}", sw.ElapsedMilliseconds);
         // Create an empty list of MagickImage objects
         var images = new List<MagickImage>();
 
         // Convert the bitmaps to MagickImage objects and add them to the list
         foreach (var frame in ImagesToBytes(frames))
         {
-            var image = new MagickImage(frame);
+            var image = new MagickImage(frame ?? Array.Empty<byte>());
             image.Alpha(AlphaOption.Discrete);
             images.Add(image);
         }
 
+        Console.WriteLine("Converting frames {0}", sw.ElapsedMilliseconds);
+
         // Create an animation from the list of images
         var animation = new MagickImageCollection(images);
 
-        // Set the animation delay to 100ms
         animation.Coalesce();
+        Console.WriteLine("Converting frames {0}", sw.ElapsedMilliseconds);
         foreach (var image in animation)
         {
             image.AnimationDelay = 2;
             image.AnimationIterations = stop ? 1 : -1;
         }
+        Console.WriteLine("Converting frames {0}", sw.ElapsedMilliseconds);
+        Stream stream = new MemoryStream();
 
-        // Save the animation to a webp file
-        await animation.WriteAsync(filename);
+        // Save the animation to a stream
+        await animation.WriteAsync(stream, MagickFormat.Gif);
+        Console.WriteLine("After saving to stream {0}", sw.ElapsedMilliseconds);
+        sw.Stop();
+        return stream;
     }
+}
+
+public class AnimatedWheel
+{
+    public AnimatedWheel(int selectedIndex, string result, Stream spinningAnimation)
+    {
+        SelectedIndex = selectedIndex;
+        Result = result;
+        SpinningAnimation = spinningAnimation;
+    }
+
+    public int SelectedIndex { get; set; }
+    public string Result { get; set; }
+    public Stream SpinningAnimation { get; set; }
 }
