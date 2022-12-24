@@ -68,32 +68,37 @@ await Task.Delay(-1);
 
 async Task HandleCommandAsync(SocketSlashCommand command)
 {
-    if (!command.Channel.Name.StartsWith("wheel", StringComparison.InvariantCultureIgnoreCase))
-        await command.RespondAsync("error");
-    switch (command.CommandName)
+    try
     {
-        case "spin":
-            await commandHandlers.HandleSpin(command);
-            break;
-        case "add":
-            await commandHandlers.HandleAdd(command);
-            break;
-        case "rm":
-            await commandHandlers.HandleRemove(command);
-            break;
-        case "randomize":
-            await commandHandlers.HandleRandomize(command);
-            break;
-        case "preview":
-            await commandHandlers.HandlePreveiw(command);
-            break;
-        default:
-            await command.RespondAsync("error");
-            break;
+        await command.DeferAsync();
+        if (!command.Channel.Name.StartsWith("wheel", StringComparison.InvariantCultureIgnoreCase))
+            await command.FollowupAsync("error");
+        switch (command.CommandName)
+        {
+            case "spin":
+                await commandHandlers.HandleSpin(command);
+                break;
+            case "add":
+                await commandHandlers.HandleAdd(command);
+                break;
+            case "rm":
+                await commandHandlers.HandleRemove(command);
+                break;
+            case "randomize":
+                await commandHandlers.HandleRandomize(command);
+                break;
+            case "preview":
+                await commandHandlers.HandlePreveiw(command);
+                break;
+            default:
+                await command.FollowupAsync("error");
+                break;
+        }
     }
-    if (command.CommandName.StartsWith("spin"))
+    catch (Exception e)
     {
-        await command.RespondWithFileAsync("FullAnimation.gif", "FullAnimation.gif");
+        Console.WriteLine(e);
+        await command.FollowupAsync("Error :(");
+        throw;
     }
-    await command.RespondAsync("Error :(");
 }

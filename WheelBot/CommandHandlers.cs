@@ -23,10 +23,8 @@ public sealed class CommandHandlers
 			return;
 		}
 
-		Console.WriteLine("starting generation");
-		await command.DeferAsync();
+        Console.WriteLine("generated wheel");
         var animation = await _wheel.GenerateAnimation();
-		Console.WriteLine("generated wheel");
         await command.FollowupWithFileAsync(animation.SpinningAnimation, "FullAnimation.gif");
 		await Task.Delay(6000);
 		Console.WriteLine("modifying original message");
@@ -39,18 +37,18 @@ public sealed class CommandHandlers
 		var optionToAdd = (string)command.Data.Options.First().Value;
 		
         _wheel.AddOption(optionToAdd);
-		await command.RespondAsync($"{command.User.Username} added {optionToAdd} to the wheel!{Environment.NewLine}The full list of options is now ['{string.Join("', '", _wheel.Options)}']");
+		await command.FollowupAsync($"{command.User.Username} added {optionToAdd} to the wheel!{Environment.NewLine}The full list of options is now ['{string.Join("', '", _wheel.Options)}']");
 	}
 	public async Task HandleRemove(SocketSlashCommand command)
 	{
         if (!_wheel.HasOptions())
         {
-            await command.RespondAsync("No options on the wheel, add options using the '/add' command");
+            await command.FollowupAsync("No options on the wheel, add options using the '/add' command");
             return;
         }
 		if (!command.Data.Options.Any())
 		{
-			await command.RespondAsync("Please add a parameter to indicate which option to delete");
+			await command.FollowupAsync("Please add a parameter to indicate which option to delete");
 			return;
 		}
 		var option = command.Data.Options.First();
@@ -59,17 +57,17 @@ public sealed class CommandHandlers
 			var value = int.Parse(option.Value.ToString() ?? "");
 			if (value < 0 || value > _wheel.Options.Count)
 			{
-				await command.RespondAsync("index out of range");
+				await command.FollowupAsync("index out of range");
 				return;
 			}
 
             var removed = _wheel.RemoveOption(value);
-            await command.RespondAsync($"{command.User.Username} removed {removed} from the wheel!{Environment.NewLine}The full list of options is now ['{string.Join("', '", _wheel.Options)}']");
+            await command.FollowupAsync($"{command.User.Username} removed {removed} from the wheel!{Environment.NewLine}The full list of options is now ['{string.Join("', '", _wheel.Options)}']");
 		}
 		else
 		{
             var removed = _wheel.RemoveOption(option.Value.ToString() ?? "");
-            await command.RespondAsync($"{command.User.Username} removed {removed} from the wheel!{Environment.NewLine}The full list of options is now ['{string.Join("', '", _wheel.Options)}']");
+            await command.FollowupAsync($"{command.User.Username} removed {removed} from the wheel!{Environment.NewLine}The full list of options is now ['{string.Join("', '", _wheel.Options)}']");
         }
 
     }
@@ -78,26 +76,26 @@ public sealed class CommandHandlers
     {
         if (!_wheel.HasOptions())
         {
-            await command.RespondAsync("No options on the wheel, add options using the '/add' command");
+            await command.FollowupAsync("No options on the wheel, add options using the '/add' command");
             return;
         }
 
         _wheel.RandomizeOrder();
         var stream = _wheel.CreatePreview();
 
-        await command.RespondWithFileAsync(stream, "preview.png", $"The new order of options is ['{string.Join("', '", _wheel.Options)}']");
+        await command.FollowupWithFileAsync(stream, "preview.png", $"The new order of options is ['{string.Join("', '", _wheel.Options)}']");
     }
 
 	public async Task HandlePreveiw(SocketSlashCommand command)
     {
         if (!_wheel.HasOptions())
         {
-            await command.RespondAsync("No options on the wheel, add options using the '/add' command");
+            await command.FollowupAsync("No options on the wheel, add options using the '/add' command");
             return;
         }
         var stream = _wheel.CreatePreview();
 
-		await command.RespondWithFileAsync(stream, "preview.png", $"The full list of options is ['{string.Join("', '", _wheel.Options)}']");
+		await command.FollowupWithFileAsync(stream, "preview.png", $"The full list of options is ['{string.Join("', '", _wheel.Options)}']");
 
     }
 }
