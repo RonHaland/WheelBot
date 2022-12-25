@@ -1,5 +1,4 @@
 ﻿using Discord.WebSocket;
-using Newtonsoft.Json.Linq;
 
 namespace WheelBot;
 
