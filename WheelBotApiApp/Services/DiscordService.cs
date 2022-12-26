@@ -7,13 +7,15 @@ namespace WheelBotApiApp.Services;
 public class DiscordService : BackgroundService
 {
     private readonly IConfiguration _config;
+    private readonly WheelService _wheelService;
     private readonly DiscordSocketClient _client;
     private CommandHandlers _commandHandlers;
 
-    public DiscordService(IConfiguration config)
+    public DiscordService(IConfiguration config, WheelService wheelService)
     {
         _commandHandlers = new();
         _config = config;
+        _wheelService = wheelService;
         _client = new();
     }
 
@@ -83,29 +85,38 @@ public class DiscordService : BackgroundService
         try
         {
             await command.DeferAsync();
+            var wheel = await _wheelService.GetWheel($"{command.GuildId?.ToString()}_{command.Channel.Name}");
+            if (wheel == null)
+            {
+                await command.FollowupAsync("Could not get or create wheel");
+                throw new Exception("Could not get wheel");
+            }
+            var commandHandlers = new CommandHandlers(wheel);
             if (!command.Channel.Name.StartsWith("wheel", StringComparison.InvariantCultureIgnoreCase))
                 await command.FollowupAsync("error");
+
             switch (command.CommandName)
             {
                 case "spin":
-                    await _commandHandlers.HandleSpin(command);
+                    await commandHandlers.HandleSpin(command);
                     break;
                 case "add":
-                    await _commandHandlers.HandleAdd(command);
+                    await commandHandlers.HandleAdd(command);
                     break;
                 case "rm":
-                    await _commandHandlers.HandleRemove(command);
+                    await commandHandlers.HandleRemove(command);
                     break;
                 case "randomize":
-                    await _commandHandlers.HandleRandomize(command);
+                    await commandHandlers.HandleRandomize(command);
                     break;
                 case "preview":
-                    await _commandHandlers.HandlePreveiw(command);
+                    await commandHandlers.HandlePreveiw(command);
                     break;
                 default:
-                    await command.FollowupAsync("error");
+                    await command.FollowupAsync("Unknown command");
                     break;
             }
+            await _wheelService.Save($"{command.GuildId?.ToString()}_{command.Channel.Name}", wheel);
         }
         catch (Exception e)
         {
@@ -113,5 +124,6 @@ public class DiscordService : BackgroundService
             await command.FollowupAsync("Error :(");
             throw;
         }
+
     }
 }

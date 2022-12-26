@@ -9,6 +9,7 @@ using SixLabors.ImageSharp.Processing;
 using SixLabors.ImageSharp.Drawing.Processing;
 using SixLabors.Fonts;
 using SixLabors.ImageSharp.Processing.Processors.Transforms;
+using System.Reflection;
 
 namespace WheelBot;
 
@@ -18,10 +19,15 @@ public sealed class WheelGenerator
     private readonly List<string> _options = new();
     private readonly Random _random = new Random();
     private FontCollection _collection = new();
-    private const int SIZE = 400;
+    private const int SIZE = 420;
 
     public bool HasOptions() => _options.Any();
     public List<string> Options => _options;
+    public WheelGenerator(List<string> options)
+    {
+        _collection.AddSystemFonts();
+        _options = options;
+    }
     public WheelGenerator()
     {
         _collection.AddSystemFonts();
@@ -57,7 +63,6 @@ public sealed class WheelGenerator
         var targetAngle = sweepAngle * (selectedIndex) + sweepAngle / 2;
         return 360 - targetAngle + 5;
     }
-
 
     private IPath MakeSlicePath(int r, float angle, float sweep)
     {
@@ -106,11 +111,12 @@ public sealed class WheelGenerator
             image.Mutate(o => o.Fill(color, path));
             image.Mutate(o => o.Draw(new Pen(Color.Black, 1), path));
 
+            var sampler = new BicubicResampler();
 
-            image.Mutate(x => x.Rotate(-(i * sweepAngle + sweepAngle / 2)));
+            image.Mutate(x => x.Rotate(-(i * sweepAngle + sweepAngle / 2), sampler));
             CropToCenter(image, r * 2);
-            image.Mutate(x => x.DrawText(_options[i], _collection.Get("Verdana").CreateFont(10), Color.Black, new PointF(r + 20, r-6)));
-            image.Mutate(x => x.Rotate((i * sweepAngle + sweepAngle / 2)));
+            image.Mutate(x => x.DrawText(_options[i], _collection.Get("Verdana").CreateFont(15), Color.Black, new PointF(r + 20, r-7)));
+            image.Mutate(x => x.Rotate((i * sweepAngle + sweepAngle / 2), sampler));
             CropToCenter(image, r * 2);
         }
 
@@ -120,7 +126,7 @@ public sealed class WheelGenerator
     private static void CropToCenter(Image img, int size)
     {
         var curSize = img.Size();
-        img.Mutate(i => i.Crop(new Rectangle((int)Math.Round((curSize.Width - size) / 2d), (int)Math.Round((curSize.Height - size) / 2d), size, size)));
+        img.Mutate(i => i.Crop(new Rectangle((int)Math.Floor((curSize.Width - size) / 2d), (int)Math.Floor((curSize.Height - size) / 2d), size, size)));
     }
 
     public async Task<Stream> CreatePreview()
@@ -157,11 +163,15 @@ public sealed class WheelGenerator
             //frames.Add(newframe);
             Console.WriteLine(sw.ElapsedMilliseconds);
             
-            var img = new Image<Rgba32>(size, size, Color.Transparent);
-            img.Mutate(x => x.DrawImage(wheel, 1));
-            wheel.Mutate(x => x.Rotate(10, new BicubicResampler()));
-            CropToCenter(wheel, size);
-            gif.Frames.AddFrame(wheel.Frames.RootFrame);
+            Image<Rgba32> img = new(SIZE, SIZE, Color.Transparent);
+            img.Mutate(x => x.DrawImage(wheel, 1).Rotate(i));
+            CropToCenter(img, size);
+            GifFrameMetadata md2 = img.Frames.RootFrame.Metadata.GetGifMetadata();
+            md2.FrameDelay = 3;
+            //await img.SaveAsPngAsync($"image{i}.png");
+
+            gif.Frames.AddFrame(img.Frames.RootFrame);
+            img.Dispose();
         }
 
         //draw last frame
