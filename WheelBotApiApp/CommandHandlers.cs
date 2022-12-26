@@ -8,13 +8,14 @@ public sealed class CommandHandlers
 	public CommandHandlers()
 	{
 		_wheel = new WheelGenerator();
-		_wheel.AddOption("opt 1");
-        _wheel.AddOption("opt 2");
-        _wheel.AddOption("opt 3");
-        _wheel.AddOption("opt 4");
     }
 
-	public async Task HandleSpin(SocketSlashCommand command)
+    public CommandHandlers(WheelGenerator wheel)
+    {
+        _wheel = wheel;
+    }
+
+    public async Task HandleSpin(SocketSlashCommand command)
 	{
 		if (!_wheel.HasOptions())
 		{
@@ -28,7 +29,7 @@ public sealed class CommandHandlers
 		await Task.Delay(6000);
 		Console.WriteLine("modifying original message");
 		await command.ModifyOriginalResponseAsync(c => c.Content = animation.Result);
-		animation.SpinningAnimation.Close();
+		await animation.SpinningAnimation.DisposeAsync();
     }
 
 	public async Task HandleAdd(SocketSlashCommand command)
@@ -80,7 +81,7 @@ public sealed class CommandHandlers
         }
 
         _wheel.RandomizeOrder();
-        var stream = _wheel.CreatePreview();
+        var stream = await _wheel.CreatePreview();
 
         await command.FollowupWithFileAsync(stream, "preview.png", $"The new order of options is ['{string.Join("', '", _wheel.Options)}']");
     }
@@ -92,7 +93,7 @@ public sealed class CommandHandlers
             await command.FollowupAsync("No options on the wheel, add options using the '/add' command");
             return;
         }
-        var stream = _wheel.CreatePreview();
+        var stream = await _wheel.CreatePreview();
 
 		await command.FollowupWithFileAsync(stream, "preview.png", $"The full list of options is ['{string.Join("', '", _wheel.Options)}']");
 

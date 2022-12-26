@@ -7,6 +7,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddHostedService<DiscordService>();
+builder.Services.AddSingleton<WheelService>();
 
 var app = builder.Build();
 
