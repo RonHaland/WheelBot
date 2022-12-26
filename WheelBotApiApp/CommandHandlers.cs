@@ -80,7 +80,7 @@ public sealed class CommandHandlers
         }
 
         _wheel.RandomizeOrder();
-        var stream = _wheel.CreatePreview();
+        var stream = await _wheel.CreatePreview();
 
         await command.FollowupWithFileAsync(stream, "preview.png", $"The new order of options is ['{string.Join("', '", _wheel.Options)}']");
     }
@@ -92,7 +92,7 @@ public sealed class CommandHandlers
             await command.FollowupAsync("No options on the wheel, add options using the '/add' command");
             return;
         }
-        var stream = _wheel.CreatePreview();
+        var stream = await _wheel.CreatePreview();
 
 		await command.FollowupWithFileAsync(stream, "preview.png", $"The full list of options is ['{string.Join("', '", _wheel.Options)}']");
 

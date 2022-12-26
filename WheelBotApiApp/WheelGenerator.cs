@@ -1,8 +1,14 @@
-﻿using ImageMagick;
+﻿using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp;
 using System.Diagnostics;
-using System.Drawing;
-using System.Drawing.Drawing2D;
-using System.Drawing.Imaging;
+using SixLabors.ImageSharp.Formats.Gif;
+using SixLabors.ImageSharp.Drawing;
+using IPath = SixLabors.ImageSharp.Drawing.IPath;
+using SixLabors.ImageSharp.Formats.Png;
+using SixLabors.ImageSharp.Processing;
+using SixLabors.ImageSharp.Drawing.Processing;
+using SixLabors.Fonts;
+using SixLabors.ImageSharp.Processing.Processors.Transforms;
 
 namespace WheelBot;
 
@@ -11,10 +17,15 @@ public sealed class WheelGenerator
     private readonly Color[] _colors = { Color.Red, Color.Orange, Color.Yellow, Color.Green, Color.Blue, Color.Purple };
     private readonly List<string> _options = new();
     private readonly Random _random = new Random();
-    private const int SIZE = 320;
+    private FontCollection _collection = new();
+    private const int SIZE = 400;
 
     public bool HasOptions() => _options.Any();
     public List<string> Options => _options;
+    public WheelGenerator()
+    {
+        _collection.AddSystemFonts();
+    }
 
     public async Task<AnimatedWheel> GenerateAnimation()
     {
@@ -23,7 +34,7 @@ public sealed class WheelGenerator
         var rotation = CalculateRotation(selectedIndex, _options.Count);
 
         //await CreateAnimation(600, _colors, _options, "FullAnimation.gif");
-        var stream = await CreateAnimation(SIZE, _colors, _options, 360*2 + rotation, true);
+        var stream = await CreateAnimation(SIZE, 360*2 + rotation, true);
 
         return new AnimatedWheel(selectedIndex, _options[selectedIndex], stream);
     }
@@ -47,161 +58,127 @@ public sealed class WheelGenerator
         return 360 - targetAngle + 5;
     }
 
-    static void MakeWheel(int size, Graphics g, Color[] colors, IList<string> options)
+
+    private IPath MakeSlicePath(int r, float angle, float sweep)
     {
+        var path = new PathBuilder();
+        // Calculate the center point of the circle
+        var center = new PointF(r, r);
+
+        // Calculate the start angle of the slice in radians
+        var startAngle = angle * Math.PI / 180;
+
+        // Calculate the end angle of the slice in radians
+        var endAngle = (angle + sweep) * Math.PI / 180;
+
+        // Calculate the coordinates of the first corner of the slice
+        var x1 = r * Math.Cos(startAngle) + center.X;
+        var y1 = r * Math.Sin(startAngle) + center.Y;
+
+        // Calculate the coordinates of the second corner of the slice
+        var x2 = r * Math.Cos(endAngle) + center.X;
+        var y2 = r * Math.Sin(endAngle) + center.Y;
+
+        // Create points for the first and second corners of the slice
+        var corner1 = new PointF((float)x1, (float)y1);
+        var corner2 = new PointF((float)x2, (float)y2);
+
+        path.AddLine(center, corner1);
+        path.AddArc(center, r, r, 0, angle, sweep);
+        path.AddLine(center, corner2);
+
+        return path.Build();
+    }
+
+    private Image MakeWheelV2(int r)
+    {
+
         // Calculate the start and sweep angles for each slice
-        int numSlices = options.Count;
+        int numSlices = _options.Count;
         float startAngle = 0;
         float sweepAngle = 360 / numSlices;
+        var image = new Image<Rgba32>(r * 2, r * 2);
 
-        // Draw the slices of the wheel
         for (int i = 0; i < numSlices; i++)
         {
-            // Fill the slice with the appropriate color
-            Brush brush = new SolidBrush(colors[i % colors.Length]);
-            g.FillPie(brush, 0, 0, size, size, startAngle, sweepAngle);
-
-            // Draw the outline of the slice
-            Pen pen = new Pen(Color.Black, 2);
-            g.DrawArc(pen, 0, 0, size, size, startAngle, sweepAngle);
-
-            // Calculate the size and position of the text
-            var fontReduction = options[i].Length < 25 ? 25 : (int)(options[i].Length*1.5);
-            Font font = new Font("Verdana", size / fontReduction);
-            SizeF textSize = g.MeasureString(options[i], font);
-            float x = size / 2 + size / 10;
-            float y = size / 2 - textSize.Height / 2;
-
-            var currentRotation = g.Transform.Clone();
-
-            // Create a rotated Matrix object
-            Matrix matrix = g.Transform;
-            matrix.RotateAt(startAngle + sweepAngle / 2, new PointF(size / 2, size / 2));
+            var color = _colors[i % _colors.Length];
+            var path = MakeSlicePath(r, i*sweepAngle, sweepAngle);
+            image.Mutate(o => o.Fill(color, path));
+            image.Mutate(o => o.Draw(new Pen(Color.Black, 1), path));
 
 
-            // Set the current transformation matrix to the rotated Matrix
-            g.Transform = matrix;
-
-            // Draw the text on the slice
-            Brush textBrush = new SolidBrush(Color.Black);
-            g.DrawString(options[i], font, textBrush, x, y);
-
-            // Reset the current transformation matrix
-            g.Transform = currentRotation;
-
-            // Update the start angle for the next slice
-            startAngle += sweepAngle;
+            image.Mutate(x => x.Rotate(-(i * sweepAngle + sweepAngle / 2)));
+            CropToCenter(image, r * 2);
+            image.Mutate(x => x.DrawText(_options[i], _collection.Get("Verdana").CreateFont(10), Color.Black, new PointF(r + 20, r-6)));
+            image.Mutate(x => x.Rotate((i * sweepAngle + sweepAngle / 2)));
+            CropToCenter(image, r * 2);
         }
+
+        return image;
     }
 
-    static IEnumerable<byte[]?> ImagesToBytes(IEnumerable<Image> imgs)
+    private static void CropToCenter(Image img, int size)
     {
-        ImageConverter converter = new ImageConverter();
-        return imgs.Select(i => (byte[]?)converter.ConvertTo(i, typeof(byte[])));
+        var curSize = img.Size();
+        img.Mutate(i => i.Crop(new Rectangle((int)Math.Round((curSize.Width - size) / 2d), (int)Math.Round((curSize.Height - size) / 2d), size, size)));
     }
 
-    public Stream CreatePreview()
+    public async Task<Stream> CreatePreview()
     {
-        Bitmap bmp = new Bitmap(SIZE, SIZE);
-        Graphics g = Graphics.FromImage(bmp);
-        MakeWheel(SIZE, g, _colors, _options);
+        using Image<Rgba32> png = new(SIZE, SIZE, Color.Transparent);
+
+        png.Mutate(x => x.DrawImage(MakeWheelV2(SIZE / 2), 1));
+
         MemoryStream stream = new();
-        bmp.Save(stream, ImageFormat.Png);
+        await png.SaveAsPngAsync(stream);
         return stream;
     }
 
-    static async Task<Stream> CreateAnimation(int size, Color[] colors, IList<string> options, int rotation = 360, bool stop = false)
+    private async Task<Stream> CreateAnimation(int size, int rotation = 360, bool stop = false)
     {
-        Bitmap bmp = new Bitmap(size, size);
+        using Image<Rgba32> gif = new(SIZE, SIZE, Color.Transparent);
+        var gifMetaData = gif.Metadata.GetGifMetadata();
+        gifMetaData.RepeatCount = 1;
+        GifFrameMetadata metadata = gif.Frames.RootFrame.Metadata.GetGifMetadata();
+        metadata.FrameDelay = 2;
 
-        // Create a new Graphics object to draw on the Bitmap
-        Graphics g = Graphics.FromImage(bmp);
-        List<Bitmap> frames = new();
+        var wheel = MakeWheelV2(size / 2);
+        GifFrameMetadata md = wheel.Frames.RootFrame.Metadata.GetGifMetadata();
+        md.FrameDelay = 3;
+
+        gif.Mutate(x => x.DrawImage(wheel, 1));
 
         Stopwatch sw = new();
         sw.Start();
 
         // Loop to rotate the wheel and save each frame of the animation
-        for (int i = 0; i < rotation; i += 10)
+        for (int i = 10; i < rotation; i += 10)
         {
-            // Clear the graphics object
-            g.Clear(Color.Transparent);
-
-            // Create a rotated Matrix object
-            Matrix matrix = new Matrix();
-            matrix.RotateAt(i, new PointF(size / 2, size / 2));
-
-            // Set the current transformation matrix to the rotated Matrix
-            g.Transform = matrix;
-
-            // Draw the slices of the wheel
-            MakeWheel(size, g, colors, options);
-            // Reset the current transformation matrix
-            g.ResetTransform();
-
-            // Save the image to a file
-            Bitmap newframe = (Bitmap)bmp.Clone();
-            //newframe.Save($"wheel{i}.png", ImageFormat.Png);
-            frames.Add(newframe);
+            //frames.Add(newframe);
             Console.WriteLine(sw.ElapsedMilliseconds);
+            
+            var img = new Image<Rgba32>(size, size, Color.Transparent);
+            img.Mutate(x => x.DrawImage(wheel, 1));
+            wheel.Mutate(x => x.Rotate(10, new BicubicResampler()));
+            CropToCenter(wheel, size);
+            gif.Frames.AddFrame(wheel.Frames.RootFrame);
         }
 
-        if(true)
-        {
-            Console.WriteLine(rotation);
-            g.Clear(Color.Transparent);
+        //draw last frame
+        var lastFrame = MakeWheelV2(size / 2);
+        lastFrame.Mutate(x => x.Rotate(rotation-5));
+        CropToCenter(lastFrame, size);
+        GifFrameMetadata lastFMd = lastFrame.Frames.RootFrame.Metadata.GetGifMetadata();
+        lastFMd.FrameDelay = 2;
+        gif.Frames.AddFrame(lastFrame.Frames.RootFrame);
+        
 
-            // Create a rotated Matrix object
-            Matrix matrix = new Matrix();
-            matrix.RotateAt(rotation-5, new PointF(size / 2, size / 2));
-
-            // Set the current transformation matrix to the rotated Matrix
-            g.Transform = matrix;
-
-            // Draw the slices of the wheel
-            MakeWheel(size, g, colors, options);
-            // Reset the current transformation matrix
-            g.ResetTransform();
-
-            // Save the image to a file
-            Bitmap newframe = (Bitmap)bmp.Clone();
-            //newframe.Save($"wheel{i}.png", ImageFormat.Png);
-            frames.Add(newframe);
-            Console.WriteLine(sw.ElapsedMilliseconds);
-        }
-
-        Console.WriteLine("After generating frames {0}", sw.ElapsedMilliseconds);
-        // Create an empty list of MagickImage objects
-        var images = new List<MagickImage>();
-
-        // Convert the bitmaps to MagickImage objects and add them to the list
-        foreach (var frame in ImagesToBytes(frames))
-        {
-            var image = new MagickImage(frame ?? Array.Empty<byte>());
-            image.Alpha(AlphaOption.Discrete);
-            images.Add(image);
-        }
-
-        Console.WriteLine("Converting frames {0}", sw.ElapsedMilliseconds);
-
-        // Create an animation from the list of images
-        var animation = new MagickImageCollection(images);
-
-        animation.Coalesce();
-        animation.OptimizePlus();
-
-        Console.WriteLine("Converting frames {0}", sw.ElapsedMilliseconds);
-        foreach (var image in animation)
-        {
-            image.AnimationDelay = 3;
-            image.AnimationIterations = stop ? 1 : -1;
-        }
-        Console.WriteLine("Converting frames {0}", sw.ElapsedMilliseconds);
+        Console.WriteLine("Drawn all frames at {0}", sw.ElapsedMilliseconds);
         Stream stream = new MemoryStream();
 
         // Save the animation to a stream
-        await animation.WriteAsync(stream, MagickFormat.Gif);
-        Console.WriteLine("After saving to stream {0}", sw.ElapsedMilliseconds);
+        await gif.SaveAsGifAsync(stream);
+        Console.WriteLine("Saved all frames at {0}", sw.ElapsedMilliseconds);
         sw.Stop();
         return stream;
     }
