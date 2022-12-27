@@ -1,5 +1,7 @@
 ﻿using Discord;
 using Discord.WebSocket;
+using System.Diagnostics;
+using System.Reactive.Concurrency;
 using WheelBot;
 
 namespace WheelBotApiApp.Services;
@@ -10,6 +12,7 @@ public class DiscordService : BackgroundService
     private readonly WheelService _wheelService;
     private readonly DiscordSocketClient _client;
     private CommandHandlers _commandHandlers;
+    private Stopwatch _stopwatch;
 
     public DiscordService(IConfiguration config, WheelService wheelService)
     {
@@ -17,12 +20,11 @@ public class DiscordService : BackgroundService
         _config = config;
         _wheelService = wheelService;
         _client = new();
+        _stopwatch = new();
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-
-
         _client.SlashCommandExecuted += HandleCommandAsync;
 
         Console.WriteLine("trying to login to bot using token of length {0}", _config["BotToken"]?.Length);
@@ -84,6 +86,7 @@ public class DiscordService : BackgroundService
     {
         try
         {
+            _stopwatch.Start();
             await command.DeferAsync();
             var wheel = await _wheelService.GetWheel($"{command.GuildId?.ToString()}_{command.Channel.Name}");
             if (wheel == null)
@@ -125,5 +128,8 @@ public class DiscordService : BackgroundService
             throw;
         }
 
+        Console.WriteLine("Processed command {1} in {0} ms", _stopwatch.ElapsedMilliseconds, command.CommandName);
+        _stopwatch.Stop();
+        _stopwatch.Reset();
     }
 }

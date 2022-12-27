@@ -1,21 +1,28 @@
-﻿using SixLabors.ImageSharp.PixelFormats;
+﻿using SixLabors.Fonts;
 using SixLabors.ImageSharp;
-using System.Diagnostics;
-using SixLabors.ImageSharp.Formats.Gif;
 using SixLabors.ImageSharp.Drawing;
-using IPath = SixLabors.ImageSharp.Drawing.IPath;
-using SixLabors.ImageSharp.Formats.Png;
-using SixLabors.ImageSharp.Processing;
 using SixLabors.ImageSharp.Drawing.Processing;
-using SixLabors.Fonts;
+using SixLabors.ImageSharp.Formats.Gif;
+using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
 using SixLabors.ImageSharp.Processing.Processors.Transforms;
-using System.Reflection;
+using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Runtime.InteropServices;
+using Color = SixLabors.ImageSharp.Color;
+using Image = SixLabors.ImageSharp.Image;
+using IPath = SixLabors.ImageSharp.Drawing.IPath;
+using Pen = SixLabors.ImageSharp.Drawing.Processing.Pen;
+using PointF = SixLabors.ImageSharp.PointF;
+using Rectangle = SixLabors.ImageSharp.Rectangle;
 
 namespace WheelBot;
 
 public sealed class WheelGenerator
 {
     private readonly Color[] _colors = { Color.Red, Color.Orange, Color.Yellow, Color.Green, Color.Blue, Color.Purple };
+    private readonly System.Drawing.Color[] _colors2 = { System.Drawing.Color.Red, System.Drawing.Color.Orange, System.Drawing.Color.Yellow, System.Drawing.Color.Green, System.Drawing.Color.Blue, System.Drawing.Color.Purple };
     private readonly List<string> _options = new();
     private readonly Random _random = new Random();
     private FontCollection _collection = new();
@@ -95,13 +102,75 @@ public sealed class WheelGenerator
         return path.Build();
     }
 
-    private Image MakeWheelV2(int r)
+    private Image MakeWheel(int r)
     {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return MakeWheelV1(r);
+        }
+        return MakeWheelV2(r);
+    }
+
+    private Image MakeWheelV1(int r)
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            throw new Exception();
 
         // Calculate the start and sweep angles for each slice
         int numSlices = _options.Count;
         float startAngle = 0;
-        float sweepAngle = 360 / numSlices;
+        float sweepAngle = (360 / (float)numSlices);
+        var diameter = r * 2;
+        var img = new System.Drawing.Bitmap(diameter, diameter);
+        var g = Graphics.FromImage(img);
+
+        // Draw the slices of the wheel
+        for (int i = 0; i < numSlices; i++)
+        {
+            // Fill the slice with the appropriate color
+            Brush brush = new System.Drawing.SolidBrush(_colors2[i % _colors2.Length]);
+            g.FillPie(brush, 0, 0, diameter, diameter, startAngle, sweepAngle);
+
+            // Draw the outline of the slice
+            System.Drawing.Pen pen = new(System.Drawing.Color.Black, 2);
+            g.DrawArc(pen, 0, 0, diameter, diameter, startAngle, sweepAngle);
+
+            // Calculate the size and position of the text
+            var fontReduction = _options[i].Length < 13 ? 35 : (int)(_options[i].Length * 2.2);
+            System.Drawing.Font font = new("Verdana", diameter / fontReduction);
+            System.Drawing.SizeF textSize = g.MeasureString(_options[i], font);
+            float x = diameter / 2 + diameter / 10;
+            float y = diameter / 2 - textSize.Height / 2;
+
+            var currentRotation = g.Transform.Clone();
+
+            // Create a rotated Matrix object
+            Matrix matrix = g.Transform;
+            matrix.RotateAt(startAngle + sweepAngle / 2, new System.Drawing.PointF(diameter / 2, diameter / 2));
+
+
+            // Set the current transformation matrix to the rotated Matrix
+            g.Transform = matrix;
+
+            // Draw the text on the slice
+            var textBrush = new System.Drawing.SolidBrush(System.Drawing.Color.Black);
+            g.DrawString(_options[i], font, textBrush, x, y);
+
+            // Reset the current transformation matrix
+            g.Transform = currentRotation;
+
+            // Update the start angle for the next slice
+            startAngle += sweepAngle;
+        }
+        Image result = Image.Load(ImageToBytes(img));
+        return result;
+    }
+
+    private Image MakeWheelV2(int r)
+    {
+        // Calculate the start and sweep angles for each slice
+        int numSlices = _options.Count;
+        float sweepAngle = (360 / (float)numSlices);
         var image = new Image<Rgba32>(r * 2, r * 2);
 
         for (int i = 0; i < numSlices; i++)
@@ -109,7 +178,7 @@ public sealed class WheelGenerator
             var color = _colors[i % _colors.Length];
             var path = MakeSlicePath(r, i*sweepAngle, sweepAngle);
             image.Mutate(o => o.Fill(color, path));
-            image.Mutate(o => o.Draw(new Pen(Color.Black, 1), path));
+            image.Mutate(o => o.Draw(new Pen(Color.Black, 2), path));
 
             var sampler = new BicubicResampler();
 
@@ -133,7 +202,7 @@ public sealed class WheelGenerator
     {
         using Image<Rgba32> png = new(SIZE, SIZE, Color.Transparent);
 
-        png.Mutate(x => x.DrawImage(MakeWheelV2(SIZE / 2), 1));
+        png.Mutate(x => x.DrawImage(MakeWheel(SIZE / 2), 1));
 
         MemoryStream stream = new();
         await png.SaveAsPngAsync(stream);
@@ -148,7 +217,7 @@ public sealed class WheelGenerator
         GifFrameMetadata metadata = gif.Frames.RootFrame.Metadata.GetGifMetadata();
         metadata.FrameDelay = 2;
 
-        var wheel = MakeWheelV2(size / 2);
+        var wheel = MakeWheel(size / 2);
         GifFrameMetadata md = wheel.Frames.RootFrame.Metadata.GetGifMetadata();
         md.FrameDelay = 3;
 
@@ -175,7 +244,7 @@ public sealed class WheelGenerator
         }
 
         //draw last frame
-        var lastFrame = MakeWheelV2(size / 2);
+        var lastFrame = MakeWheel(size / 2);
         lastFrame.Mutate(x => x.Rotate(rotation-5));
         CropToCenter(lastFrame, size);
         GifFrameMetadata lastFMd = lastFrame.Frames.RootFrame.Metadata.GetGifMetadata();
@@ -204,6 +273,15 @@ public sealed class WheelGenerator
     {
         _options.Remove(value);
         return value;
+    }
+
+    static byte[]? ImageToBytes(System.Drawing.Image img)
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            throw new Exception();
+
+        ImageConverter converter = new();
+        return (byte[]?)converter.ConvertTo(img, typeof(byte[]));
     }
 }
 
