@@ -80,6 +80,13 @@ public class DiscordService : BackgroundService
                 .WithDescription("Generates a still image preview of the wheel");
             await _client.CreateGlobalApplicationCommandAsync(command.Build());
         }
+        if (!cmds.Any(c => c.Name == "reset"))
+        {
+            var command = new SlashCommandBuilder()
+                .WithName("reset")
+                .WithDescription("Clears all options from the wheel");
+            await _client.CreateGlobalApplicationCommandAsync(command.Build());
+        }
     }
 
     private async Task Handle(SocketSlashCommand command) => HandleCommandAsync(command);
@@ -98,8 +105,6 @@ public class DiscordService : BackgroundService
                 throw new Exception("Could not get wheel");
             }
             var commandHandlers = new CommandHandlers(wheel);
-            if (!command.Channel.Name.StartsWith("wheel", StringComparison.InvariantCultureIgnoreCase))
-                await command.FollowupAsync("error");
 
             switch (command.CommandName)
             {
@@ -117,6 +122,9 @@ public class DiscordService : BackgroundService
                     break;
                 case "preview":
                     await commandHandlers.HandlePreveiw(command);
+                    break;
+                case "reset":
+                    await commandHandlers.HandleReset(command);
                     break;
                 default:
                     await command.FollowupAsync("Unknown command");

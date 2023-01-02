@@ -39,6 +39,7 @@ public sealed class CommandHandlers
         _wheel.AddOption(optionToAdd);
 		await command.FollowupAsync($"{command.User.Username} added {optionToAdd} to the wheel!{Environment.NewLine}The full list of options is now ['{string.Join("', '", _wheel.Options)}']");
 	}
+
 	public async Task HandleRemove(SocketSlashCommand command)
 	{
         if (!_wheel.HasOptions())
@@ -97,5 +98,11 @@ public sealed class CommandHandlers
 
 		await command.FollowupWithFileAsync(stream, "preview.png", $"The full list of options is ['{string.Join("', '", _wheel.Options)}']");
 
+    }
+
+    public async Task HandleReset(SocketSlashCommand command)
+    {
+        _wheel.Clear(); 
+        await command.FollowupAsync($"{command.User.Username} cleared the wheel!{Environment.NewLine}The full list of options is now ['{string.Join("', '", _wheel.Options)}']");
     }
 }

@@ -275,6 +275,11 @@ public sealed class WheelGenerator
         return value;
     }
 
+    public void Clear()
+    {
+        _options.Clear();
+    }
+
     static byte[]? ImageToBytes(System.Drawing.Image img)
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
