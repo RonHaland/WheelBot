@@ -11,29 +11,29 @@ public class DiscordService : BackgroundService
     private readonly IConfiguration _config;
     private readonly WheelService _wheelService;
     private readonly DiscordSocketClient _client;
-    private CommandHandlers _commandHandlers;
-    private Stopwatch _stopwatch;
+    private readonly DiscordShardedClient _sharedClient;
 
     public DiscordService(IConfiguration config, WheelService wheelService)
     {
-        _commandHandlers = new();
         _config = config;
         _wheelService = wheelService;
         _client = new();
-        _stopwatch = new();
+        _sharedClient = new();
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _client.SlashCommandExecuted += HandleCommandAsync;
+        _sharedClient.SlashCommandExecuted += Handle;
 
         Console.WriteLine("trying to login to bot using token of length {0}", _config["BotToken"]?.Length);
 
         await _client.LoginAsync(TokenType.Bot, _config["BotToken"]);
+        await _sharedClient.LoginAsync(TokenType.Bot, _config["BotToken"]);
 
         _client.Ready += OnReady;
 
         await _client.StartAsync();
+        await _sharedClient.StartAsync();
 
         Console.WriteLine("Bot is running");
     }
@@ -82,11 +82,14 @@ public class DiscordService : BackgroundService
         }
     }
 
+    private async Task Handle(SocketSlashCommand command) => HandleCommandAsync(command);
+
     private async Task HandleCommandAsync(SocketSlashCommand command)
     {
+        Stopwatch stopwatch = new();
+        stopwatch.Start();
         try
         {
-            _stopwatch.Start();
             await command.DeferAsync();
             var wheel = await _wheelService.GetWheel($"{command.GuildId?.ToString()}_{command.Channel.Name}");
             if (wheel == null)
@@ -128,8 +131,8 @@ public class DiscordService : BackgroundService
             throw;
         }
 
-        Console.WriteLine("Processed command {1} in {0} ms", _stopwatch.ElapsedMilliseconds, command.CommandName);
-        _stopwatch.Stop();
-        _stopwatch.Reset();
+        Console.WriteLine("Processed command {1} in {0} ms", stopwatch.ElapsedMilliseconds, command.CommandName);
+        stopwatch.Stop();
+        stopwatch.Reset();
     }
 }

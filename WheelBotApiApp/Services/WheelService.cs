@@ -1,10 +1,8 @@
 ﻿using Azure;
 using Azure.Data.Tables;
-using Discord;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using WheelBot;
 
 namespace WheelBotApiApp.Services;
@@ -35,7 +33,7 @@ public class WheelService
 			options.AddRange(JsonSerializer.Deserialize<List<string>>(entity.Value.OptionsJson) ?? new List<string>());
 		}
         var newWheel = new WheelGenerator(options);
-        _wheelCache.Set(wheelId, newWheel);
+        _wheelCache.Set(wheelId, newWheel, TimeSpan.FromMinutes(30));
 
         return newWheel;
     }
