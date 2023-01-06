@@ -3,7 +3,7 @@ using Azure.Data.Tables;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using System.Text.Json;
-using WheelBot;
+using WheelBotApiApp.WheelGenerators;
 
 namespace WheelBotApiApp.Services;
 
@@ -18,12 +18,12 @@ public class WheelService
 		_client = client;
 	}
 
-	public async Task<WheelGenerator?> GetWheel(string wheelId)
+	public async Task<Wheel?> GetWheel(string wheelId)
 	{
 		if (string.IsNullOrWhiteSpace(wheelId))
 			throw new ArgumentNullException(nameof(wheelId), "give a wheel Id");
 
-		if (_wheelCache.TryGetValue(wheelId, out WheelGenerator? wheel))
+		if (_wheelCache.TryGetValue(wheelId, out Wheel? wheel))
 			return wheel;
 
 		var entity = await _client.GetEntityIfExistsAsync<WheelEntity>("wheel", wheelId);
@@ -32,13 +32,13 @@ public class WheelService
 		{
 			options.AddRange(JsonSerializer.Deserialize<List<string>>(entity.Value.OptionsJson) ?? new List<string>());
 		}
-        var newWheel = new WheelGenerator(options);
+        var newWheel = new Wheel(options);
         _wheelCache.Set(wheelId, newWheel, TimeSpan.FromMinutes(30));
 
         return newWheel;
     }
 
-	public async Task Save(string wheelId, WheelGenerator wheelGen)
+	public async Task Save(string wheelId, Wheel wheelGen)
 	{
 		var wheel = new WheelEntity("wheel", wheelId, DateTime.UtcNow, new ETag()) { OptionsJson = JsonSerializer.Serialize(wheelGen.Options) };
 		await _client.UpsertEntityAsync(wheel);

@@ -3,6 +3,7 @@ using Discord.WebSocket;
 using System.Diagnostics;
 using System.Reactive.Concurrency;
 using WheelBot;
+using WheelBotApiApp.WheelGenerators;
 
 namespace WheelBotApiApp.Services;
 
@@ -10,13 +11,15 @@ public class DiscordService : BackgroundService
 {
     private readonly IConfiguration _config;
     private readonly WheelService _wheelService;
+    private readonly IWheelGenerator _wheelGenerator;
     private readonly DiscordSocketClient _client;
     private readonly DiscordShardedClient _sharedClient;
 
-    public DiscordService(IConfiguration config, WheelService wheelService)
+    public DiscordService(IConfiguration config, WheelService wheelService, IWheelGenerator wheelGenerator)
     {
         _config = config;
         _wheelService = wheelService;
+        _wheelGenerator = wheelGenerator;
         _client = new();
         _sharedClient = new();
     }
@@ -89,7 +92,7 @@ public class DiscordService : BackgroundService
         }
     }
 
-    private async Task Handle(SocketSlashCommand command) => HandleCommandAsync(command);
+    private async Task Handle(SocketSlashCommand command) => await Task.Run(() => HandleCommandAsync(command));
 
     private async Task HandleCommandAsync(SocketSlashCommand command)
     {
@@ -104,27 +107,27 @@ public class DiscordService : BackgroundService
                 await command.FollowupAsync("Could not get or create wheel");
                 throw new Exception("Could not get wheel");
             }
-            var commandHandlers = new CommandHandlers(wheel);
+            var commandHandlers = new CommandHandlers(_wheelGenerator);
 
             switch (command.CommandName)
             {
                 case "spin":
-                    await commandHandlers.HandleSpin(command);
+                    await commandHandlers.HandleSpin(command, wheel);
                     break;
                 case "add":
-                    await commandHandlers.HandleAdd(command);
+                    await commandHandlers.HandleAdd(command, wheel);
                     break;
                 case "rm":
-                    await commandHandlers.HandleRemove(command);
+                    await commandHandlers.HandleRemove(command, wheel);
                     break;
                 case "randomize":
-                    await commandHandlers.HandleRandomize(command);
+                    await commandHandlers.HandleRandomize(command, wheel);
                     break;
                 case "preview":
-                    await commandHandlers.HandlePreveiw(command);
+                    await commandHandlers.HandlePreveiw(command, wheel);
                     break;
                 case "reset":
-                    await commandHandlers.HandleReset(command);
+                    await commandHandlers.HandleReset(command, wheel);
                     break;
                 default:
                     await command.FollowupAsync("Unknown command");
