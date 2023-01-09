@@ -24,8 +24,7 @@ public sealed class CommandHandlers
         var animation = await _wheelGenerator.GenerateAnimation(wheel);
         await command.FollowupWithFileAsync(animation.SpinningAnimation, "FullAnimation.gif");
 		await Task.Delay(6000);
-		Console.WriteLine("modifying original message");
-		await command.ModifyOriginalResponseAsync(c => c.Content = animation.Result);
+		await command.ModifyOriginalResponseAsync(c => c.Content = $"{command.User.Mention} spun '{animation.Result}'");
 		await animation.SpinningAnimation.DisposeAsync();
     }
 
