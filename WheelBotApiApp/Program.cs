@@ -10,9 +10,9 @@ builder.Services.AddSwaggerGen();
 builder.Services.AddHostedService<DiscordService>();
 builder.Services.AddSingleton<WheelService>();
 builder.Services.AddSingleton<CommandHandlers>();
-builder.Services.AddSingleton<IWheelGenerator>(sp => 
-    RuntimeInformation.IsOSPlatform(OSPlatform.Windows) 
-        ? new WheelGeneratorWindows() 
-        : new WheelGeneratorMultiPlatform());
+if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+    builder.Services.AddSingleton<IWheelGenerator, WheelGeneratorWindows>();
+else
+    builder.Services.AddSingleton<IWheelGenerator, WheelGeneratorMultiPlatform>();
 
 builder.Build().Run();
