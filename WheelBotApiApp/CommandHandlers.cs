@@ -33,7 +33,7 @@ public sealed class CommandHandlers
 		var optionToAdd = (string)command.Data.Options.First().Value;
 
         wheel.AddOption(optionToAdd);
-		await command.FollowupAsync($"{command.User.Username} added {optionToAdd} to the wheel!{Environment.NewLine}The full list of options is now ['{string.Join("', '", wheel.Options)}']");
+		await command.FollowupAsync($"{command.User.Mention} added {optionToAdd} to the wheel!{Environment.NewLine}The full list of options is now ['{string.Join("', '", wheel.Options)}']");
 	}
 
 	public async Task HandleRemove(SocketSlashCommand command, Wheel wheel)
@@ -49,6 +49,7 @@ public sealed class CommandHandlers
 			return;
 		}
 		var option = command.Data.Options.First();
+        string removed = string.Empty;
 		if (option.Name == "index")
 		{
 			var value = int.Parse(option.Value.ToString() ?? "");
@@ -58,15 +59,14 @@ public sealed class CommandHandlers
 				return;
 			}
 
-            var removed = wheel.RemoveOption(value);
-            await command.FollowupAsync($"{command.User.Username} removed {removed} from the wheel!{Environment.NewLine}The full list of options is now ['{string.Join("', '", wheel.Options)}']");
+            removed = wheel.RemoveOption(value);
 		}
 		else
 		{
-            var removed = wheel.RemoveOption(option.Value.ToString() ?? "");
-            await command.FollowupAsync($"{command.User.Username} removed {removed} from the wheel!{Environment.NewLine}The full list of options is now ['{string.Join("', '", wheel.Options)}']");
+            removed = wheel.RemoveOption(option.Value.ToString() ?? "");
         }
 
+        await command.FollowupAsync($"{command.User.Mention} removed {removed} from the wheel!{Environment.NewLine}The full list of options is now ['{string.Join("', '", wheel.Options)}']");
     }
 
 	public async Task HandleRandomize(SocketSlashCommand command, Wheel wheel)
@@ -99,6 +99,6 @@ public sealed class CommandHandlers
     public async Task HandleReset(SocketSlashCommand command, Wheel wheel)
     {
         wheel.Clear(); 
-        await command.FollowupAsync($"{command.User.Username} cleared the wheel!{Environment.NewLine}The full list of options is now ['{string.Join("', '", wheel.Options)}']");
+        await command.FollowupAsync($"{command.User.Mention} cleared the wheel!{Environment.NewLine}The full list of options is now ['{string.Join("', '", wheel.Options)}']");
     }
 }

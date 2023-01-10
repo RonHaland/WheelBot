@@ -10,6 +10,7 @@ A dicord bot for spinning a wheel of fortune.
 |/preview | generates a still image of the current wheel|
 |/randomize | randomize the order of all the options|
 |/spin | generates a gif of a spinning wheel that lands on a random option|
+|/reset | clears all options from the wheel |
 
 
 ## Example output

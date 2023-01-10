@@ -35,7 +35,7 @@ public class Wheel
 
     public string RemoveOption(string value)
     {
-        _options.Remove(value);
+        _options.RemoveAll(x => x == value);
         return value;
     }
 
