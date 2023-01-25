@@ -23,7 +23,7 @@ public sealed class CommandHandlers
         Console.WriteLine("generated wheel");
         var animation = await _wheelGenerator.GenerateAnimation(wheel);
         await command.FollowupWithFileAsync(animation.SpinningAnimation, "FullAnimation.gif");
-		await Task.Delay(6000);
+		await Task.Delay(7500);
 		await command.ModifyOriginalResponseAsync(c => c.Content = $"{command.User.Mention} spun '{animation.Result}'");
 		await animation.SpinningAnimation.DisposeAsync();
     }

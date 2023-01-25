@@ -14,7 +14,7 @@ namespace WheelBotApiApp.WheelGenerators;
 public class WheelGeneratorWindows : IWheelGenerator
 {
     private readonly Color[] _colors = { Color.Red, Color.Orange, Color.Yellow, Color.Green, Color.Blue, Color.Purple };
-    private readonly int _size = 380;
+    private readonly int _size = 320;
     private readonly Random _random = new();
 
     public async Task<Stream> CreatePreview(Wheel wheel)
@@ -38,7 +38,7 @@ public class WheelGeneratorWindows : IWheelGenerator
 
         var rotation = CalculateRotation(selectedIndex, wheel.Options.Count);
 
-        var stream = await CreateAnimation(wheel, 360 * 2 + rotation);
+        var stream = await CreateAnimation(wheel, 360 * 3 + rotation);
 
         return new AnimatedWheel(selectedIndex, wheel.Options[selectedIndex], stream);
     }
@@ -111,10 +111,8 @@ public class WheelGeneratorWindows : IWheelGenerator
         var image = MakeWheel(_size / 2, wheel);
         var gif = CreateGifWithMetadata(image);
 
-        for (int i = 0; i < rotation; i += 10)
+        for (int i = 180; i < rotation-5; i += (int)(20 * Factor(i, rotation+60)))
         {
-
-            
             Image<Rgba32> frame = CreateFrameFromImage(image, i);
             gif.Frames.AddFrame(frame.Frames.RootFrame);
 
@@ -130,6 +128,8 @@ public class WheelGeneratorWindows : IWheelGenerator
         await gif.SaveAsGifAsync(stream);
         return stream;
     }
+
+    private double Factor(float x, float fullRotation) => ((fullRotation - (1/fullRotation) * float.Pow(x, 2))/ fullRotation);
 
     private Image<Rgba32> CreateFrameFromImage(Bitmap image, float rotation)
     {
@@ -157,7 +157,7 @@ public class WheelGeneratorWindows : IWheelGenerator
         gifMetadata.RepeatCount = 1;
 
         var frameMetadata = gif.Frames.RootFrame.Metadata.GetGifMetadata();
-        frameMetadata.FrameDelay = 3;
+        frameMetadata.FrameDelay = 8;
 
         return gif;
     }
