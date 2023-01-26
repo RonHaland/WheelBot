@@ -111,7 +111,7 @@ public class WheelGeneratorWindows : IWheelGenerator
         var image = MakeWheel(_size / 2, wheel);
         var gif = CreateGifWithMetadata(image);
 
-        for (int i = 180; i < rotation-5; i += (int)(20 * Factor(i, rotation+60)))
+        for (int i = 180; i < rotation-5; i += int.Max(1, (int)(20 * Factor(i, rotation + 40))))
         {
             Image<Rgba32> frame = CreateFrameFromImage(image, i);
             gif.Frames.AddFrame(frame.Frames.RootFrame);
