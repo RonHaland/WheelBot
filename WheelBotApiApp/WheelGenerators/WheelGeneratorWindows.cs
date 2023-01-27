@@ -22,7 +22,8 @@ public class WheelGeneratorWindows : IWheelGenerator
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             throw new Exception();
 
-        var image = await Task.FromResult(MakeWheel(_size / 2, wheel));
+        var image = await Task.FromResult(MakeWheel((_size / 2) - 5, wheel));
+        MakeSmallTriangle(12);
         MemoryStream stream = new();
         image.Save(stream, ImageFormat.Png);
 
@@ -60,7 +61,9 @@ public class WheelGeneratorWindows : IWheelGenerator
         float startAngle = 0;
         float sweepAngle = 360 / (float)numSlices;
         var diameter = r * 2;
-        var img = new Bitmap(diameter, diameter);
+        var sizeDiff = _size - diameter;
+        var halfSizeDiff = sizeDiff / 2;
+        var img = new Bitmap(_size, _size);
         var g = Graphics.FromImage(img);
 
         // Draw the slices of the wheel
@@ -68,24 +71,24 @@ public class WheelGeneratorWindows : IWheelGenerator
         {
             // Fill the slice with the appropriate color
             Brush brush = new SolidBrush(_colors[i % _colors.Length]);
-            g.FillPie(brush, 0, 0, diameter, diameter, startAngle, sweepAngle);
+            g.FillPie(brush, halfSizeDiff, halfSizeDiff, diameter, diameter, startAngle, sweepAngle);
 
             // Draw the outline of the slice
             Pen pen = new(Color.Black, 2);
-            g.DrawArc(pen, 0, 0, diameter, diameter, startAngle, sweepAngle);
+            g.DrawArc(pen, halfSizeDiff, halfSizeDiff, diameter, diameter, startAngle, sweepAngle);
 
             // Calculate the size and position of the text
             var fontReduction = wheel.Options[i].Length < 13 ? 28 : (int)(wheel.Options[i].Length * 2.2);
             Font font = new("Verdana", diameter / fontReduction);
             SizeF textSize = g.MeasureString(wheel.Options[i], font);
-            float x = diameter / 2 + diameter / 10;
-            float y = diameter / 2 - textSize.Height / 2;
+            float x = halfSizeDiff + diameter / 2 + diameter / 10;
+            float y = halfSizeDiff + diameter / 2 - textSize.Height / 2;
 
             var currentRotation = g.Transform.Clone();
 
             // Create a rotated Matrix object
             Matrix matrix = g.Transform;
-            matrix.RotateAt(startAngle + sweepAngle / 2, new PointF(diameter / 2, diameter / 2));
+            matrix.RotateAt(startAngle + sweepAngle / 2, new PointF(_size / 2, _size / 2));
 
             // Set the current transformation matrix to the rotated Matrix
             g.Transform = matrix;
@@ -103,17 +106,35 @@ public class WheelGeneratorWindows : IWheelGenerator
         return img;
     }
 
+    private Bitmap MakeSmallTriangle(int h)
+    {
+        var img = new Bitmap(_size, _size);
+        var g = Graphics.FromImage(img);
+        var s = _size;
+
+        Pen pen = new(Color.Black, 2);
+        Brush brush = new SolidBrush(Color.DarkGray);
+        PointF[] points = new[] { new PointF(s-1, s/2 + h/2), new PointF(s-1, s / 2 - h / 2), new PointF(s - h, s / 2) }; 
+        g.FillPolygon(brush, points);
+        g.DrawPolygon(pen, points);
+
+        img.Save("c:\\test.png", ImageFormat.Png);
+
+        return img;
+    }
+
     private async Task<Stream> CreateAnimation(Wheel wheel, int rotation)
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             throw new Exception();
 
-        var image = MakeWheel(_size / 2, wheel);
-        var gif = CreateGifWithMetadata(image);
+        var image = MakeWheel(_size / 2 - 5, wheel);
+        var pointer = MakeSmallTriangle(12);
+        var gif = CreateGifWithMetadata(image, pointer);
 
         for (int i = 180; i < rotation-5; i += int.Max(1, (int)(20 * Factor(i, rotation + 40))))
         {
-            Image<Rgba32> frame = CreateFrameFromImage(image, i);
+            Image<Rgba32> frame = CreateFrameFromImage(image, i, pointer);
             gif.Frames.AddFrame(frame.Frames.RootFrame);
 
             //frame.Save($"d:\\image{i}.png");
@@ -121,7 +142,7 @@ public class WheelGeneratorWindows : IWheelGenerator
 
         var g2 = Graphics.FromImage(image);
         g2.Transform.RotateAt(rotation, new PointF(_size / 2, _size / 2));
-        Image<Rgba32> finalFrame = CreateFrameFromImage(image, rotation-5);
+        Image<Rgba32> finalFrame = CreateFrameFromImage(image, rotation-5, pointer);
         gif.Frames.AddFrame(finalFrame.Frames.RootFrame);
 
         Stream stream = new MemoryStream();
@@ -131,7 +152,7 @@ public class WheelGeneratorWindows : IWheelGenerator
 
     private double Factor(float x, float fullRotation) => ((fullRotation - (1/fullRotation) * float.Pow(x, 2))/ fullRotation);
 
-    private Image<Rgba32> CreateFrameFromImage(Bitmap image, float rotation)
+    private Image<Rgba32> CreateFrameFromImage(Bitmap image, float rotation, Bitmap pointer)
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             throw new Exception();
@@ -144,15 +165,22 @@ public class WheelGeneratorWindows : IWheelGenerator
         g.Transform = transform;
         g.DrawImage(image, 0, 0);
 
+        transform.RotateAt(-rotation, new PointF(_size / 2, _size / 2));
+        g.Transform = transform;
+        g.DrawImage(pointer, 0, 0);
+
+        transform.RotateAt(rotation, new PointF(_size / 2, _size / 2));
+        g.Transform = transform;
+
         var frame = SixLabors.ImageSharp.Image.Load<Rgba32>(ImageToBytes(clone));
         var frameMetadata = frame.Frames.RootFrame.Metadata.GetGifMetadata();
         frameMetadata.FrameDelay = 3;
         return frame;
     }
 
-    private Image<Rgba32> CreateGifWithMetadata(Bitmap initialFrame)
+    private Image<Rgba32> CreateGifWithMetadata(Bitmap initialFrame, Bitmap pointer)
     {
-        Image<Rgba32> gif = CreateFrameFromImage(initialFrame, 0);
+        Image<Rgba32> gif = CreateFrameFromImage(initialFrame, 0, pointer);
         var gifMetadata = gif.Metadata.GetGifMetadata();
         gifMetadata.RepeatCount = 1;
 
