@@ -4,7 +4,6 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
-using System.Security.Cryptography.Xml;
 using Color = System.Drawing.Color;
 using PointF = System.Drawing.PointF;
 using SizeF = System.Drawing.SizeF;
@@ -14,7 +13,7 @@ namespace WheelBotApiApp.WheelGenerators;
 public class WheelGeneratorWindows : IWheelGenerator
 {
     private readonly Color[] _colors = { Color.Red, Color.Orange, Color.Yellow, Color.Green, Color.Blue, Color.Purple };
-    private readonly int _size = 320;
+    private readonly int _size = 360;
     private readonly Random _random = new();
 
     public async Task<Stream> CreatePreview(Wheel wheel)
@@ -45,9 +44,9 @@ public class WheelGeneratorWindows : IWheelGenerator
 
     int CalculateRotation(int selectedIndex, int length)
     {
-        var sweepAngle = 360 / length;
-        var targetAngle = sweepAngle * selectedIndex + sweepAngle / 2;
-        return 360 - targetAngle + 5;
+        float sweepAngle = 360 / (float)length;
+        float targetAngle = sweepAngle * (float)selectedIndex + sweepAngle / 2;
+        return (int)(360 - targetAngle);
     }
 
     private Bitmap MakeWheel(int r, Wheel wheel)
@@ -75,7 +74,8 @@ public class WheelGeneratorWindows : IWheelGenerator
             // Draw the outline of the slice
             Pen pen = new(Color.Black, 2);
             g.DrawArc(pen, halfSizeDiff, halfSizeDiff, diameter, diameter, startAngle, sweepAngle);
-
+            pen = new(Color.Black, 1);
+            g.DrawPie(pen, halfSizeDiff, halfSizeDiff, diameter, diameter, startAngle, sweepAngle);
             // Calculate the size and position of the text
             var fontReduction = wheel.Options[i].Length < 13 ? 28 : (int)(wheel.Options[i].Length * 2.2);
             Font font = new("Verdana", diameter / fontReduction);
@@ -132,17 +132,15 @@ public class WheelGeneratorWindows : IWheelGenerator
         var pointer = MakeSmallTriangle(12);
         var gif = CreateGifWithMetadata(image, pointer);
 
-        for (int i = 180; i < rotation-5; i += int.Max(1, (int)(20 * Factor(i, rotation + 40))))
+        for (int i = 180; i < rotation; i += int.Max(1, (int)(20 * Factor(i, rotation + 40))))
         {
             Image<Rgba32> frame = CreateFrameFromImage(image, i, pointer);
             gif.Frames.AddFrame(frame.Frames.RootFrame);
-
-            //frame.Save($"d:\\image{i}.png");
         }
 
         var g2 = Graphics.FromImage(image);
         g2.Transform.RotateAt(rotation, new PointF(_size / 2, _size / 2));
-        Image<Rgba32> finalFrame = CreateFrameFromImage(image, rotation-5, pointer);
+        Image<Rgba32> finalFrame = CreateFrameFromImage(image, rotation, pointer);
         gif.Frames.AddFrame(finalFrame.Frames.RootFrame);
 
         Stream stream = new MemoryStream();
