@@ -23,7 +23,6 @@ public class WheelGeneratorWindows : IWheelGenerator
             throw new Exception();
 
         var image = await Task.FromResult(MakeWheel((_size / 2) - 5, wheel));
-        MakeSmallTriangle(12);
         MemoryStream stream = new();
         image.Save(stream, ImageFormat.Png);
 
@@ -108,6 +107,9 @@ public class WheelGeneratorWindows : IWheelGenerator
 
     private Bitmap MakeSmallTriangle(int h)
     {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            throw new Exception();
+
         var img = new Bitmap(_size, _size);
         var g = Graphics.FromImage(img);
         var s = _size;
@@ -117,8 +119,6 @@ public class WheelGeneratorWindows : IWheelGenerator
         PointF[] points = new[] { new PointF(s-1, s/2 + h/2), new PointF(s-1, s / 2 - h / 2), new PointF(s - h, s / 2) }; 
         g.FillPolygon(brush, points);
         g.DrawPolygon(pen, points);
-
-        img.Save("c:\\test.png", ImageFormat.Png);
 
         return img;
     }
