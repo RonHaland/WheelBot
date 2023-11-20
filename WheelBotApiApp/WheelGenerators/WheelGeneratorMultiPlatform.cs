@@ -84,7 +84,7 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
             var color = _colors[i % _colors.Length];
             var path = MakeSlicePath(r, i * sweepAngle, sweepAngle);
             image.Mutate(o => o.Fill(color, path));
-            image.Mutate(o => o.Draw(new Pen(Color.Black, 2), path));
+            image.Mutate(o => o.Draw(new SolidPen(Color.Black, 2), path));
 
             var sampler = new BicubicResampler();
 
@@ -100,7 +100,7 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
 
     private static void CropToCenter(Image img, int size)
     {
-        var curSize = img.Size();
+        var curSize = img.Size;
         img.Mutate(i => i.Crop(new Rectangle((int)Math.Floor((curSize.Width - size) / 2d), (int)Math.Floor((curSize.Height - size) / 2d), size, size)));
     }
 
