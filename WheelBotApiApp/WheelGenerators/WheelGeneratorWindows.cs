@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using Color = System.Drawing.Color;
 using PointF = System.Drawing.PointF;
 using SizeF = System.Drawing.SizeF;
@@ -16,6 +17,7 @@ public class WheelGeneratorWindows : IWheelGenerator
     private readonly int _size = 360;
     private readonly Random _random = new();
 
+    [SupportedOSPlatform("windows10.0.18362")]
     public async Task<Stream> CreatePreview(Wheel wheel)
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
@@ -28,6 +30,7 @@ public class WheelGeneratorWindows : IWheelGenerator
         return stream;
     }
 
+    [SupportedOSPlatform("windows10.0.18362")]
     public async Task<AnimatedWheel> GenerateAnimation(Wheel wheel)
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
@@ -49,6 +52,7 @@ public class WheelGeneratorWindows : IWheelGenerator
         return (int)(360 - targetAngle);
     }
 
+    [SupportedOSPlatform("windows10.0.18362")]
     private Bitmap MakeWheel(int r, Wheel wheel)
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
@@ -105,6 +109,7 @@ public class WheelGeneratorWindows : IWheelGenerator
         return img;
     }
 
+    [SupportedOSPlatform("windows10.0.18362")]
     private Bitmap MakeSmallTriangle(int h)
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
@@ -123,6 +128,7 @@ public class WheelGeneratorWindows : IWheelGenerator
         return img;
     }
 
+    [SupportedOSPlatform("windows10.0.18362")]
     private async Task<Stream> CreateAnimation(Wheel wheel, int rotation)
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
@@ -150,6 +156,7 @@ public class WheelGeneratorWindows : IWheelGenerator
 
     private double Factor(float x, float fullRotation) => ((fullRotation - (1/fullRotation) * float.Pow(x, 2))/ fullRotation);
 
+    [SupportedOSPlatform("windows10.0.18362")]
     private Image<Rgba32> CreateFrameFromImage(Bitmap image, float rotation, Bitmap pointer)
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
@@ -176,6 +183,7 @@ public class WheelGeneratorWindows : IWheelGenerator
         return frame;
     }
 
+    [SupportedOSPlatform("windows10.0.18362")]
     private Image<Rgba32> CreateGifWithMetadata(Bitmap initialFrame, Bitmap pointer)
     {
         Image<Rgba32> gif = CreateFrameFromImage(initialFrame, 0, pointer);
@@ -188,6 +196,7 @@ public class WheelGeneratorWindows : IWheelGenerator
         return gif;
     }
 
+    [SupportedOSPlatform("windows10.0.18362")]
     static byte[]? ImageToBytes(System.Drawing.Image img)
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
