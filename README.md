@@ -1,5 +1,5 @@
 # WheelBot
-A dicord bot for spinning a wheel of fortune.
+A discord bot for spinning a wheel of fortune.
 I will not be hosting a public version of this bot.
 
 ## Commands
