@@ -20,6 +20,9 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
     public WheelGeneratorMultiPlatform()
     {
         _collection.AddSystemFonts();
+        if (!Directory.Exists("/fonts") || !File.Exists("/fonts/Verdana.ttf")) return;
+        
+        _collection.Add("/fonts/Verdana.ttf");
     }
 
     public async Task<AnimatedWheel> GenerateAnimation(Wheel wheel)

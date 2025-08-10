@@ -93,6 +93,7 @@ jobs:
               --name ${Local_env}wheelbot \
               --restart unless-stopped \
               --network wheel-net \
+              -v /home/ronny/storage/wheel/fonts:/fonts \
               -p ${{ env.PROD_PORT }}:${{ env.PROD_PORT }} \
               -e ASPNETCORE_HTTP_PORTS=${{ env.PROD_PORT }} \
               -e "WheelConnStr"="${{ env.STORAGE_CONNECTION_STRING }}" \
