@@ -1,0 +1,107 @@
+name: build and deploy
+on: [workflow_dispatch]
+
+env:
+  ENVIRONMENT: PROD
+  ENVIRONMENT_LOWER: ''
+  BASE_CONNECTION_STRING: ${{ secrets.STORAGE_CONNECTION_STRING }}
+  STORAGE_CONNECTION_STRING: ''
+  PROD_PORT: 8888
+  PROD_STORAGE_PORT: 10500
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: set lowercase Environment variable
+        run: |
+          UPPERCASE_VALUE="${{ env.ENVIRONMENT }}"
+          LOWERCASE_VALUE=$(echo "$UPPERCASE_VALUE" | tr '[:upper:]' '[:lower:]')
+          echo "ENVIRONMENT_LOWER=$LOWERCASE_VALUE" >> $GITHUB_ENV
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: create ssh key on agent
+        run: |
+          mkdir ./.ssh
+          touch ./.ssh/rsa_key
+          echo "${{ secrets.SSH_KEY }}" > ./.ssh/rsa_key
+          chmod 600 ./.ssh/rsa_key
+
+      - name: copy files to server
+        run: |
+          ssh -o StrictHostKeyChecking=no -i ./.ssh/rsa_key ronny@${{ secrets.SERVER_IP }} "mkdir -p ./temp/wheel/"
+          scp -o StrictHostKeyChecking=no -i ./.ssh/rsa_key -r . ronny@${{ secrets.SERVER_IP }}:./temp/wheel/
+
+      - name: configure network
+        run: |
+          ssh -o StrictHostKeyChecking=no -i ./.ssh/rsa_key ronny@${{ secrets.SERVER_IP }} "
+            sudo docker network inspect wheel-net || \
+              sudo docker network create wheel-net
+          "
+
+      - name: configure storage
+        run: |
+          ssh -o StrictHostKeyChecking=no -i ./.ssh/rsa_key ronny@${{ secrets.SERVER_IP }} 'bash -s' << 'EOF'
+            set -euxo pipefail  
+            Local_env=${{ env.ENVIRONMENT_LOWER }}
+            STORAGE_PORT=${{ env.PROD_STORAGE_PORT }}
+            BLOB_PORT=$(($STORAGE_PORT + 0))
+            QUEUE_PORT=$(($STORAGE_PORT + 1))
+            TABLE_PORT=$(($STORAGE_PORT + 2))
+            mkdir -p storage/wheel
+            echo "setting up storage for $Local_env using ports($BLOB_PORT $QUEUE_PORT $TABLE_PORT) based on port $STORAGE_PORT"
+            sudo docker container inspect wheelazurite || \
+              (sudo docker pull mcr.microsoft.com/azure-storage/azurite && \
+              sudo docker run -d \
+                --name wheelazurite \
+                --restart unless-stopped \
+                --network wheel-net \
+                -v /home/ronny/storage/wheel:/data \
+                -p $BLOB_PORT:$BLOB_PORT \
+                -p $QUEUE_PORT:$QUEUE_PORT \
+                -p $TABLE_PORT:$TABLE_PORT \
+                mcr.microsoft.com/azure-storage/azurite \
+                azurite -l /data --blobPort $BLOB_PORT --queuePort $QUEUE_PORT --tablePort $TABLE_PORT \
+                --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0)
+          EOF
+
+      - name: set storage connection string
+        run: |
+          Local_env=${{ env.ENVIRONMENT_LOWER }}
+          STORAGE_PORT=${{ env.PROD_STORAGE_PORT }}
+          BLOB_PORT=$(($STORAGE_PORT + 0))
+          QUEUE_PORT=$(($STORAGE_PORT + 1))
+          TABLE_PORT=$(($STORAGE_PORT + 2))
+          BLOB_ENDPOINT="BlobEndpoint=http://wheelazurite:${BLOB_PORT}/devstoreaccount1;"
+          QUEUE_ENDPOINT="QueueEndpoint=http://wheelazurite:${QUEUE_PORT}/devstoreaccount1;"
+          TABLE_ENDPOINT="TableEndpoint=http://wheelazurite:${TABLE_PORT}/devstoreaccount1;"
+          CONNECTION_STRING="${{env.BASE_CONNECTION_STRING}}${BLOB_ENDPOINT}${QUEUE_ENDPOINT}${TABLE_ENDPOINT}"
+          echo "STORAGE_CONNECTION_STRING=$CONNECTION_STRING" >> $GITHUB_ENV
+
+      - name: build docker file
+        run: |
+          ssh -o StrictHostKeyChecking=no -i ./.ssh/rsa_key ronny@${{ secrets.SERVER_IP }} << 'EOF'
+            Local_env=${{ env.ENVIRONMENT_LOWER }}
+            cd temp/wheel/
+            sudo docker build -t ${Local_env}wheelbot -f ./WheelBotApiApp/Dockerfile .
+            sudo docker stop ${Local_env}wheelbot
+            sudo docker container rm ${Local_env}wheelbot
+            sudo docker run -d \
+              --name ${Local_env}wheelbot \
+              --restart unless-stopped \
+              --network wheel-net \
+              -p ${{ env.PROD_PORT }}:${{ env.PROD_PORT }} \
+              -e ASPNETCORE_HTTP_PORTS=${{ env.PROD_PORT }} \
+              -e "WheelConnStr"="${{ env.STORAGE_CONNECTION_STRING }}" \
+              -e "BotToken"="${{ secrets.BOT_TOKEN }}" \
+              -e Environment="${{ env.ENVIRONMENT }}" \
+              ${Local_env}wheelbot
+            exit 
+            EOF
+
+      - name: clean up files
+        run: |
+          ssh -o StrictHostKeyChecking=no -i ./.ssh/rsa_key ronny@${{ secrets.SERVER_IP }} "sudo rm -r temp/wheel"

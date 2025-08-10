@@ -12,9 +12,9 @@ namespace WheelBotApiApp.WheelGenerators;
 
 public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
 {
-    private readonly Color[] _colors = { Color.Red, Color.Orange, Color.Yellow, Color.Green, Color.Blue, Color.Purple };
+    private readonly Color[] _colors = [Color.Red, Color.Orange, Color.Yellow, Color.Green, Color.Blue, Color.Purple];
     private readonly Random _random = new Random();
-    private FontCollection _collection = new();
+    private readonly FontCollection _collection = new();
     private readonly int _size = 420;
 
     public WheelGeneratorMultiPlatform()
@@ -28,40 +28,33 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
 
         var rotation = CalculateRotation(selectedIndex, wheel.Options.Count);
 
-        //await CreateAnimation(600, _colors, _options, "FullAnimation.gif");
         var stream = await CreateAnimation(wheel, 360 * 2 + rotation, true);
 
         return new AnimatedWheel(selectedIndex, wheel.Options[selectedIndex], stream);
     }
 
-    int CalculateRotation(int selectedIndex, int length)
+    static int CalculateRotation(int selectedIndex, int length)
     {
         var sweepAngle = 360 / length;
         var targetAngle = sweepAngle * selectedIndex + sweepAngle / 2;
         return 360 - targetAngle + 5;
     }
 
-    private IPath MakeSlicePath(int r, float angle, float sweep)
+    private static IPath MakeSlicePath(int r, float angle, float sweep)
     {
         var path = new PathBuilder();
-        // Calculate the center point of the circle
         var center = new PointF(r, r);
-
-        // Calculate the start angle of the slice in radians
+        
         var startAngle = angle * Math.PI / 180;
 
-        // Calculate the end angle of the slice in radians
         var endAngle = (angle + sweep) * Math.PI / 180;
 
-        // Calculate the coordinates of the first corner of the slice
         var x1 = r * Math.Cos(startAngle) + center.X;
         var y1 = r * Math.Sin(startAngle) + center.Y;
 
-        // Calculate the coordinates of the second corner of the slice
         var x2 = r * Math.Cos(endAngle) + center.X;
         var y2 = r * Math.Sin(endAngle) + center.Y;
 
-        // Create points for the first and second corners of the slice
         var corner1 = new PointF((float)x1, (float)y1);
         var corner2 = new PointF((float)x2, (float)y2);
 
@@ -72,14 +65,13 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
         return path.Build();
     }
 
-    private Image MakeWheel(int r, Wheel wheel)
+    private Image<Rgba32> MakeWheel(int r, Wheel wheel)
     {
-        // Calculate the start and sweep angles for each slice
-        int numSlices = wheel.Options.Count;
-        float sweepAngle = 360 / (float)numSlices;
+        var numSlices = wheel.Options.Count;
+        var sweepAngle = 360 / (float)numSlices;
         var image = new Image<Rgba32>(r * 2, r * 2);
 
-        for (int i = 0; i < numSlices; i++)
+        for (var i = 0; i < numSlices; i++)
         {
             var color = _colors[i % _colors.Length];
             var path = MakeSlicePath(r, i * sweepAngle, sweepAngle);
@@ -123,6 +115,7 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
         GifFrameMetadata metadata = gif.Frames.RootFrame.Metadata.GetGifMetadata();
         metadata.FrameDelay = 2;
 
+        var targetTriangle = MakeSmallTriangle(10);
         var wheelImage = MakeWheel(_size / 2, wheel);
         GifFrameMetadata md = wheelImage.Frames.RootFrame.Metadata.GetGifMetadata();
         md.FrameDelay = 3;
@@ -132,18 +125,15 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
         Stopwatch sw = new();
         sw.Start();
 
-        // Loop to rotate the wheel and save each frame of the animation
-        for (int i = 10; i < rotation; i += 10)
+        for (var i = 10; i < rotation; i += 10)
         {
-            //frames.Add(newframe);
-            Console.WriteLine(sw.ElapsedMilliseconds);
-
             Image<Rgba32> img = new(_size, _size, Color.Transparent);
             img.Mutate(x => x.DrawImage(wheelImage, 1).Rotate(i));
             CropToCenter(img, _size);
+
+            img.Mutate(o => o.DrawImage(targetTriangle, 1));
             GifFrameMetadata md2 = img.Frames.RootFrame.Metadata.GetGifMetadata();
             md2.FrameDelay = 3;
-            //await img.SaveAsPngAsync($"image{i}.png");
 
             gif.Frames.AddFrame(img.Frames.RootFrame);
             img.Dispose();
@@ -153,6 +143,7 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
         var lastFrame = MakeWheel(_size / 2, wheel);
         lastFrame.Mutate(x => x.Rotate(rotation - 5));
         CropToCenter(lastFrame, _size);
+        lastFrame.Mutate(o => o.DrawImage(targetTriangle, 1));
         GifFrameMetadata lastFMd = lastFrame.Frames.RootFrame.Metadata.GetGifMetadata();
         lastFMd.FrameDelay = 2;
         gif.Frames.AddFrame(lastFrame.Frames.RootFrame);
@@ -166,5 +157,24 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
         Console.WriteLine("Saved all frames at {0}", sw.ElapsedMilliseconds);
         sw.Stop();
         return stream;
+    }
+    
+    private Image<Rgba32> MakeSmallTriangle(int height)
+    {
+
+        var img = new Image<Rgba32>(_size, _size);
+
+        var pen = new SolidPen(Color.Black, 2);
+        var brush = new SolidBrush(Color.DarkGray);
+        PointF[] points =
+        [
+            new (_size - 1, _size / 2f + height / 2f),
+            new (_size - 1, _size / 2f - height / 2f),
+            new (_size - height, _size / 2f)
+        ];
+        img.Mutate(i => i.FillPolygon(brush, points));
+        img.Mutate(i => i.DrawPolygon(pen, points));
+
+        return img;
     }
 }

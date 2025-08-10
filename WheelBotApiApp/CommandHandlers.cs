@@ -16,7 +16,7 @@ public sealed class CommandHandlers
 	{
 		if (!wheel.HasOptions())
 		{
-			await command.RespondAsync("No options on the wheel, add options using the '/add' command");
+			await command.FollowupAsync("No options on the wheel, add options using the '/add' command");
 			return;
 		}
 

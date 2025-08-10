@@ -2,45 +2,44 @@
 
 public class Wheel
 {
-    private readonly List<string> _options = new();
     private readonly Random _random = new();
-    public bool HasOptions() => _options.Any();
-    public List<string> Options => _options;
+    public bool HasOptions() => Options.Count != 0;
+    public List<string> Options { get; } = [];
 
     public Wheel(List<string> options)
     {
-        _options = options;
+        Options = options;
     }
 
     public Wheel() { }
 
     public void RandomizeOrder()
     {
-        var newOrder = _options.OrderBy(x => _random.Next(5000)).ToList();
-        _options.Clear();
-        _options.AddRange(newOrder);
+        var newOrder = Options.OrderBy(x => _random.Next(5000)).ToList();
+        Options.Clear();
+        Options.AddRange(newOrder);
     }
 
     public void AddOption(string option)
     {
-        _options.Add(option);
+        Options.Add(option);
     }
 
     public string RemoveOption(int value)
     {
-        var removed = _options[value];
-        _options.RemoveAt(value);
+        var removed = Options[value];
+        Options.RemoveAt(value);
         return removed;
     }
 
     public string RemoveOption(string value)
     {
-        _options.RemoveAll(x => x == value);
+        Options.RemoveAll(x => x == value);
         return value;
     }
 
     public void Clear()
     {
-        _options.Clear();
+        Options.Clear();
     }
 }

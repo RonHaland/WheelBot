@@ -45,7 +45,7 @@ public class WheelGeneratorWindows : IWheelGenerator
         return new AnimatedWheel(selectedIndex, wheel.Options[selectedIndex], stream);
     }
 
-    int CalculateRotation(int selectedIndex, int length)
+    static int CalculateRotation(int selectedIndex, int length)
     {
         float sweepAngle = 360 / (float)length;
         float targetAngle = sweepAngle * (float)selectedIndex + sweepAngle / 2;
@@ -154,7 +154,7 @@ public class WheelGeneratorWindows : IWheelGenerator
         return stream;
     }
 
-    private double Factor(float x, float fullRotation) => ((fullRotation - (1/fullRotation) * float.Pow(x, 2))/ fullRotation);
+    private static double Factor(float x, float fullRotation) => ((fullRotation - (1/fullRotation) * float.Pow(x, 2))/ fullRotation);
 
     [SupportedOSPlatform("windows10.0.18362")]
     private Image<Rgba32> CreateFrameFromImage(Bitmap image, float rotation, Bitmap pointer)
