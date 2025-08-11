@@ -5,7 +5,6 @@ using SixLabors.ImageSharp.Drawing.Processing;
 using SixLabors.ImageSharp.Formats.Gif;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
-using SixLabors.ImageSharp.Processing.Processors.Transforms;
 using System.Diagnostics;
 using System.Numerics;
 
@@ -26,12 +25,25 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
         }
     };
 
-    public WheelGeneratorMultiPlatform()
+    public WheelGeneratorMultiPlatform(IConfiguration configuration)
     {
-        _collection.AddSystemFonts();
-        if (!Directory.Exists("/fonts") || !File.Exists("/fonts/Verdana.ttf")) return;
-        
-        _collection.Add("/fonts/Verdana.ttf");
+        var fontPath = configuration["FontPath"];
+        if (Directory.Exists(fontPath))
+        {
+            if (File.Exists($"{fontPath}/Roboto-Regular.ttf"))
+            {
+                _collection.Add($"{fontPath}/Roboto-Regular.ttf");
+            }
+            if (File.Exists($"{fontPath}/NotoColorEmoji-Regular.ttf"))
+            {
+                _collection.Add($"{fontPath}/NotoColorEmoji-Regular.ttf");
+            }
+        }
+
+        if (!_collection.Families.Any())
+        {
+            _collection.AddSystemFonts();
+        }
     }
 
     public async Task<AnimatedWheel> GenerateAnimation(Wheel wheel)
@@ -84,7 +96,8 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
         var sweepAngle = 360f / numSlices;
         var image = new Image<Rgba32>(r * 2, r * 2);
         var center = new PointF(r, r);
-        var font = _collection.Get("Verdana").CreateFont(15, FontStyle.Regular);
+        var font = _collection.Get("Roboto").CreateFont(15, FontStyle.Regular);
+        var emojiFont = _collection.Get("Noto Color Emoji");
 
         for (var i = 0; i < numSlices; i++)
         {
@@ -110,12 +123,17 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
                 Origin = textPosition,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
+                FallbackFontFamilies = [emojiFont],
             };
             var drawingOpts = new DrawingOptions
             {
                 Transform = Matrix3x2.CreateRotation(textAngleRadians, textPosition)
             };
-            image.Mutate(o => o.DrawText(drawingOpts, textOpts, wheelEntryText, null, new SolidPen(Color.Black)));
+            image.Mutate(o =>
+            {
+                o.Clip(path, ctx => 
+                    ctx.DrawText(drawingOpts, textOpts, wheelEntryText, null, new SolidPen(Color.Black)));
+            });
         }
 
         return image;

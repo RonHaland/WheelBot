@@ -98,6 +98,7 @@ jobs:
               -e ASPNETCORE_HTTP_PORTS=${{ env.PROD_PORT }} \
               -e "WheelConnStr"="${{ env.STORAGE_CONNECTION_STRING }}" \
               -e "BotToken"="${{ secrets.BOT_TOKEN }}" \
+              -e "FontPath"="/fonts" \
               -e Environment="${{ env.ENVIRONMENT }}" \
               ${Local_env}wheelbot
             exit 
