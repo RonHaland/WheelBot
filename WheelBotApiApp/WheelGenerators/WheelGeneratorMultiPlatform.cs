@@ -38,6 +38,11 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
             {
                 _collection.Add($"{fontPath}/NotoColorEmoji-Regular.ttf");
             }
+            if (File.Exists($"{fontPath}/Twemoji.Mozilla.ttf"))
+            {
+                _collection.Add($"{fontPath}/Twemoji.Mozilla.ttf");
+            }
+            
         }
 
         if (!_collection.Families.Any())
@@ -97,7 +102,7 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
         var image = new Image<Rgba32>(r * 2, r * 2);
         var center = new PointF(r, r);
         var font = _collection.Get("Roboto").CreateFont(15, FontStyle.Regular);
-        var emojiFont = _collection.Get("Noto Color Emoji");
+        var emojiFontFamily = _collection.Get("Twemoji Mozilla");
 
         for (var i = 0; i < numSlices; i++)
         {
@@ -123,7 +128,7 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
                 Origin = textPosition,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
-                FallbackFontFamilies = [emojiFont],
+                FallbackFontFamilies = [emojiFontFamily],
             };
             var drawingOpts = new DrawingOptions
             {
@@ -137,12 +142,6 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
         }
 
         return image;
-    }
-
-    private static void CropToCenter(Image img, int size)
-    {
-        var curSize = img.Size;
-        img.Mutate(i => i.Crop(new Rectangle((int)Math.Floor((curSize.Width - size) / 2d), (int)Math.Floor((curSize.Height - size) / 2d), size, size)));
     }
 
     public async Task<Stream> CreatePreview(Wheel wheel)
