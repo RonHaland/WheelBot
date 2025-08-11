@@ -7,6 +7,7 @@ using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using SixLabors.ImageSharp.Processing.Processors.Transforms;
 using System.Diagnostics;
+using System.Numerics;
 
 namespace WheelBotApiApp.WheelGenerators;
 
@@ -16,6 +17,14 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
     private readonly Random _random = new Random();
     private readonly FontCollection _collection = new();
     private readonly int _size = 420;
+    
+    private DrawingOptions DrawingOptions => new()
+    {
+        GraphicsOptions = new GraphicsOptions
+        {
+            Antialias = true,
+        }
+    };
 
     public WheelGeneratorMultiPlatform()
     {
@@ -48,9 +57,9 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
         var path = new PathBuilder();
         var center = new PointF(r, r);
         
-        var startAngle = angle * Math.PI / 180;
+        var startAngle = angle * Math.PI / 180d;
 
-        var endAngle = (angle + sweep) * Math.PI / 180;
+        var endAngle = (angle + sweep) * Math.PI / 180d;
 
         var x1 = r * Math.Cos(startAngle) + center.X;
         var y1 = r * Math.Sin(startAngle) + center.Y;
@@ -73,21 +82,39 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
         var numSlices = wheel.Options.Count;
         var sweepAngle = 360 / (float)numSlices;
         var image = new Image<Rgba32>(r * 2, r * 2);
+        var center = new PointF(r, r);
+        var font = _collection.Get("Verdana").CreateFont(15, FontStyle.Regular);
 
         for (var i = 0; i < numSlices; i++)
         {
+            var wheelEntryText = wheel.Options[i];
             var color = _colors[i % _colors.Length];
-            var path = MakeSlicePath(r, i * sweepAngle, sweepAngle);
-            image.Mutate(o => o.Fill(color, path));
-            image.Mutate(o => o.Draw(new SolidPen(Color.Black, 2), path));
-
-            var sampler = new BicubicResampler();
-
-            image.Mutate(x => x.Rotate(-(i * sweepAngle + sweepAngle / 2), sampler));
-            CropToCenter(image, r * 2);
-            image.Mutate(x => x.DrawText(wheel.Options[i], _collection.Get("Verdana").CreateFont(15), Color.Black, new PointF(r + 20, r - 7)));
-            image.Mutate(x => x.Rotate(i * sweepAngle + sweepAngle / 2, sampler));
-            CropToCenter(image, r * 2);
+            var startAngle = sweepAngle * i;
+            var path = MakeSlicePath(r, startAngle, sweepAngle);
+            image.Mutate(o =>
+            {
+                o.Fill(DrawingOptions, color, path);
+                o.Draw(DrawingOptions, new SolidPen(Color.Black, 2), path);
+            });
+            
+            var textAngle = startAngle + sweepAngle / 2f;
+            var textRadius = r * 0.6f;
+            var textAngleRadians = (float)(Math.PI / 180f) * textAngle;
+            var textPosition = new PointF(
+                center.X + textRadius * (float)Math.Cos(textAngleRadians),
+                center.Y + textRadius * (float)Math.Sin(textAngleRadians)
+            );
+            var textOpts = new RichTextOptions(font)
+            {
+                Origin = textPosition,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            var drawingOpts = new DrawingOptions
+            {
+                Transform = Matrix3x2.CreateRotation(textAngleRadians, textPosition)
+            };
+            image.Mutate(o => o.DrawText(drawingOpts, textOpts, wheelEntryText, null, new SolidPen(Color.Black)));
         }
 
         return image;
@@ -123,18 +150,23 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
         GifFrameMetadata md = wheelImage.Frames.RootFrame.Metadata.GetGifMetadata();
         md.FrameDelay = 3;
 
-        gif.Mutate(x => x.DrawImage(wheelImage, 1));
+        gif.Mutate(x => x.DrawImage(wheelImage, DrawingOptions.GraphicsOptions));
 
         Stopwatch sw = new();
         sw.Start();
 
-        for (var i = 10; i < rotation; i += 10)
+        for (var i = 10f; i < rotation; i += 10)
         {
             Image<Rgba32> img = new(_size, _size, Color.Transparent);
-            img.Mutate(x => x.DrawImage(wheelImage, 1).Rotate(i));
-            CropToCenter(img, _size);
+            var degrees = i;
+            var transformMatrix = new AffineTransformBuilder()
+                .AppendRotationDegrees(degrees, new Vector2(_size / 2f, _size / 2f));
+            var rotatedWheel =
+                wheelImage.Clone(c => c.Transform(transformMatrix, new BicubicResampler() ));
 
-            img.Mutate(o => o.DrawImage(targetTriangle, 1));
+            img.Mutate(x => x.DrawImage(rotatedWheel, DrawingOptions.GraphicsOptions));
+
+            img.Mutate(o => o.DrawImage(targetTriangle, DrawingOptions.GraphicsOptions));
             GifFrameMetadata md2 = img.Frames.RootFrame.Metadata.GetGifMetadata();
             md2.FrameDelay = 3;
 
@@ -144,9 +176,9 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
 
         //draw last frame
         var lastFrame = MakeWheel(_size / 2, wheel);
-        lastFrame.Mutate(x => x.Rotate(rotation - 5));
+        lastFrame.Mutate(x => x.Rotate(rotation - 5,new NearestNeighborResampler()));
         CropToCenter(lastFrame, _size);
-        lastFrame.Mutate(o => o.DrawImage(targetTriangle, 1));
+        lastFrame.Mutate(o => o.DrawImage(targetTriangle, DrawingOptions.GraphicsOptions));
         GifFrameMetadata lastFMd = lastFrame.Frames.RootFrame.Metadata.GetGifMetadata();
         lastFMd.FrameDelay = 2;
         gif.Frames.AddFrame(lastFrame.Frames.RootFrame);
@@ -164,7 +196,6 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
     
     private Image<Rgba32> MakeSmallTriangle(int height)
     {
-
         var img = new Image<Rgba32>(_size, _size);
 
         var pen = new SolidPen(Color.Black, 2);
