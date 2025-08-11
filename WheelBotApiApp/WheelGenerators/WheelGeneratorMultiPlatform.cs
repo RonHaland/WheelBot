@@ -88,7 +88,7 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
         for (var i = 0; i < numSlices; i++)
         {
             var wheelEntryText = wheel.Options[i];
-            var color = _colors[i % _colors.Length];
+            var color = i == numSlices - 1 && numSlices == _colors.Length + 1 ? _colors[_colors.Length/2] : _colors[i % _colors.Length];
             var startAngle = sweepAngle * i;
             var path = MakeSlicePath(r, startAngle, sweepAngle);
             image.Mutate(o =>
@@ -150,12 +150,16 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
         GifFrameMetadata md = wheelImage.Frames.RootFrame.Metadata.GetGifMetadata();
         md.FrameDelay = 3;
 
-        gif.Mutate(x => x.DrawImage(wheelImage, DrawingOptions.GraphicsOptions));
+        gif.Mutate(x =>
+        {
+            x.DrawImage(wheelImage, DrawingOptions.GraphicsOptions);
+            x.DrawImage(targetTriangle, DrawingOptions.GraphicsOptions);
+        });
 
         Stopwatch sw = new();
         sw.Start();
 
-        for (var i = 10f; i < rotation; i += 10)
+        for (var i = 180f; i < rotation; i += float.Max(0.66f, (float)(20 * Factor(i, rotation + 40))))
         {
             Image<Rgba32> img = new(_size, _size, Color.Transparent);
             var degrees = i;
@@ -193,6 +197,8 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
         sw.Stop();
         return stream;
     }
+    
+    private static double Factor(float x, float fullRotation) => ((fullRotation - (1/fullRotation) * float.Pow(x, 2))/ fullRotation);
     
     private Image<Rgba32> MakeSmallTriangle(int height)
     {
