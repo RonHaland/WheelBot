@@ -45,11 +45,11 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
         return new AnimatedWheel(selectedIndex, wheel.Options[selectedIndex], stream);
     }
 
-    static int CalculateRotation(int selectedIndex, int length)
+    static float CalculateRotation(int selectedIndex, int length)
     {
-        var sweepAngle = 360 / length;
+        var sweepAngle = 360f / length;
         var targetAngle = sweepAngle * selectedIndex + sweepAngle / 2;
-        return 360 - targetAngle + 5;
+        return 360 - targetAngle;
     }
 
     private static IPath MakeSlicePath(int r, float angle, float sweep)
@@ -58,29 +58,30 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
         var center = new PointF(r, r);
         
         var startAngle = angle * Math.PI / 180d;
-
+        
         var endAngle = (angle + sweep) * Math.PI / 180d;
-
+        
         var x1 = r * Math.Cos(startAngle) + center.X;
         var y1 = r * Math.Sin(startAngle) + center.Y;
-
+        
         var x2 = r * Math.Cos(endAngle) + center.X;
         var y2 = r * Math.Sin(endAngle) + center.Y;
-
+        
         var corner1 = new PointF((float)x1, (float)y1);
         var corner2 = new PointF((float)x2, (float)y2);
-
-        path.AddLine(center, corner1);
-        path.AddArc(center, r, r, 0, angle, sweep);
-        path.AddLine(center, corner2);
+        
+        path.MoveTo(center);
+        path.LineTo(corner1);
+        path.ArcTo(r,r, 0, false, true, corner2);
+        path.CloseFigure();
 
         return path.Build();
     }
 
-    private Image<Rgba32> MakeWheel(int r, Wheel wheel)
+    private Image<Rgba32> MakeWheel(int r, Wheel wheel, float rotationDegrees = 0)
     {
         var numSlices = wheel.Options.Count;
-        var sweepAngle = 360 / (float)numSlices;
+        var sweepAngle = 360f / numSlices;
         var image = new Image<Rgba32>(r * 2, r * 2);
         var center = new PointF(r, r);
         var font = _collection.Get("Verdana").CreateFont(15, FontStyle.Regular);
@@ -89,7 +90,7 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
         {
             var wheelEntryText = wheel.Options[i];
             var color = i == numSlices - 1 && numSlices == _colors.Length + 1 ? _colors[_colors.Length/2] : _colors[i % _colors.Length];
-            var startAngle = sweepAngle * i;
+            var startAngle = (rotationDegrees + sweepAngle * i) % 360 ;
             var path = MakeSlicePath(r, startAngle, sweepAngle);
             image.Mutate(o =>
             {
@@ -137,16 +138,18 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
         return stream;
     }
 
-    private async Task<Stream> CreateAnimation(Wheel wheel, int rotation = 360, bool stop = false)
+    private async Task<Stream> CreateAnimation(Wheel wheel, float rotation = 360f, bool stop = false)
     {
+        var sw = Stopwatch.StartNew();
         using Image<Rgba32> gif = new(_size, _size, Color.Transparent);
         var gifMetaData = gif.Metadata.GetGifMetadata();
         gifMetaData.RepeatCount = 1;
         GifFrameMetadata metadata = gif.Frames.RootFrame.Metadata.GetGifMetadata();
         metadata.FrameDelay = 2;
-
+        
         var targetTriangle = MakeSmallTriangle(10);
         var wheelImage = MakeWheel(_size / 2, wheel);
+        Console.WriteLine("Generated wheel at {0}", sw.ElapsedMilliseconds);
         GifFrameMetadata md = wheelImage.Frames.RootFrame.Metadata.GetGifMetadata();
         md.FrameDelay = 3;
 
@@ -156,32 +159,33 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
             x.DrawImage(targetTriangle, DrawingOptions.GraphicsOptions);
         });
 
-        Stopwatch sw = new();
-        sw.Start();
+        List<Task<Image<Rgba32>>> rotatedWheelsTasks = [];
 
-        for (var i = 180f; i < rotation; i += float.Max(0.66f, (float)(20 * Factor(i, rotation + 40))))
+        for (var i = 180f; i < rotation; i += float.Max(0.66f, (float)(20 * Factor(i, rotation))))
         {
-            Image<Rgba32> img = new(_size, _size, Color.Transparent);
             var degrees = i;
-            var transformMatrix = new AffineTransformBuilder()
-                .AppendRotationDegrees(degrees, new Vector2(_size / 2f, _size / 2f));
-            var rotatedWheel =
-                wheelImage.Clone(c => c.Transform(transformMatrix, new BicubicResampler() ));
+            var task = Task.Run(() => MakeWheel(_size / 2, wheel, degrees));
+            rotatedWheelsTasks.Add(task);
+        }
+        
+        await Task.WhenAll(rotatedWheelsTasks);
+        Console.WriteLine("All frames ({1}) generated at {0}", sw.ElapsedMilliseconds, rotatedWheelsTasks.Count);
+        
+        var wheelFrames = rotatedWheelsTasks.Select(t => t.Result);
 
-            img.Mutate(x => x.DrawImage(rotatedWheel, DrawingOptions.GraphicsOptions));
-
-            img.Mutate(o => o.DrawImage(targetTriangle, DrawingOptions.GraphicsOptions));
-            GifFrameMetadata md2 = img.Frames.RootFrame.Metadata.GetGifMetadata();
+        foreach (var frame in wheelFrames)
+        {
+            GifFrameMetadata md2 = frame.Frames.RootFrame.Metadata.GetGifMetadata();
             md2.FrameDelay = 3;
+            
+            frame.Mutate(x => x.DrawImage(targetTriangle,  DrawingOptions.GraphicsOptions));
 
-            gif.Frames.AddFrame(img.Frames.RootFrame);
-            img.Dispose();
+            gif.Frames.AddFrame(frame.Frames.RootFrame);
+            frame.Dispose();
         }
 
         //draw last frame
-        var lastFrame = MakeWheel(_size / 2, wheel);
-        lastFrame.Mutate(x => x.Rotate(rotation - 5,new NearestNeighborResampler()));
-        CropToCenter(lastFrame, _size);
+        var lastFrame = MakeWheel(_size / 2, wheel, rotation);
         lastFrame.Mutate(o => o.DrawImage(targetTriangle, DrawingOptions.GraphicsOptions));
         GifFrameMetadata lastFMd = lastFrame.Frames.RootFrame.Metadata.GetGifMetadata();
         lastFMd.FrameDelay = 2;
@@ -193,7 +197,7 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
 
         // Save the animation to a stream
         await gif.SaveAsGifAsync(stream);
-        Console.WriteLine("Saved all frames at {0}", sw.ElapsedMilliseconds);
+        Console.WriteLine("Saved all frames at {0}, size: {1}", sw.ElapsedMilliseconds, stream.Length);
         sw.Stop();
         return stream;
     }

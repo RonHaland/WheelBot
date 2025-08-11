@@ -20,7 +20,6 @@ public sealed class CommandHandlers
 			return;
 		}
 
-        Console.WriteLine("generated wheel");
         var animation = await _wheelGenerator.GenerateAnimation(wheel);
         await command.FollowupWithFileAsync(animation.SpinningAnimation, "FullAnimation.gif");
 		await Task.Delay(7500);
