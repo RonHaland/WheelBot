@@ -12,7 +12,7 @@ namespace WheelBotApiApp.WheelGenerators;
 
 public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
 {
-    private readonly Color[] _colors = [Color.Red, Color.Orange, Color.Yellow, Color.Green, Color.Blue, Color.Purple];
+    private readonly Color[] _colors = [Color.Red, Color.Orange, Color.Yellow, Color.LimeGreen, Color.LightSkyBlue, Color.MediumPurple];
     private readonly Random _random = new Random();
     private readonly FontCollection _collection = new();
     private readonly int _size = 420;
@@ -22,7 +22,7 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
         GraphicsOptions = new GraphicsOptions
         {
             Antialias = true,
-        }
+        },
     };
 
     public WheelGeneratorMultiPlatform(IConfiguration configuration)
@@ -54,9 +54,7 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
     public async Task<AnimatedWheel> GenerateAnimation(Wheel wheel)
     {
         var selectedIndex = _random.Next(wheel.Options.Count);
-
         var rotation = CalculateRotation(selectedIndex, wheel.Options.Count);
-
         var stream = await CreateAnimation(wheel, 360 * 2 + rotation, true);
 
         return new AnimatedWheel(selectedIndex, wheel.Options[selectedIndex], stream);
@@ -75,8 +73,8 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
         var center = new PointF(r, r);
         
         var startAngle = angle * Math.PI / 180d;
-        
-        var endAngle = (angle + sweep) * Math.PI / 180d;
+        var endDegrees = angle + sweep;
+        var endAngle = endDegrees * Math.PI / 180d;
         
         var x1 = r * Math.Cos(startAngle) + center.X;
         var y1 = r * Math.Sin(startAngle) + center.Y;
@@ -104,7 +102,7 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
         var font = _collection.Get("Roboto").CreateFont(15, FontStyle.Regular);
         var emojiFontFamily = _collection.Get("Twemoji Mozilla");
 
-        for (var i = 0; i < numSlices; i++)
+        for (var i = numSlices -1; i >= 0; i--)
         {
             var wheelEntryText = wheel.Options[i];
             var color = i == numSlices - 1 && numSlices == _colors.Length + 1 ? _colors[_colors.Length/2] : _colors[i % _colors.Length];
@@ -132,12 +130,13 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
             };
             var drawingOpts = new DrawingOptions
             {
-                Transform = Matrix3x2.CreateRotation(textAngleRadians, textPosition)
+                Transform = Matrix3x2.CreateRotation(textAngleRadians, textPosition),
+                GraphicsOptions = DrawingOptions.GraphicsOptions
             };
             image.Mutate(o =>
             {
                 o.Clip(path, ctx => 
-                    ctx.DrawText(drawingOpts, textOpts, wheelEntryText, null, new SolidPen(Color.Black)));
+                    ctx.DrawText(drawingOpts, textOpts, wheelEntryText, Brushes.Solid(Color.Black), null));
             });
         }
 
@@ -163,6 +162,7 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator
         gifMetaData.RepeatCount = 1;
         GifFrameMetadata metadata = gif.Frames.RootFrame.Metadata.GetGifMetadata();
         metadata.FrameDelay = 2;
+        metadata.ColorTableMode = GifColorTableMode.Global;
         
         var targetTriangle = MakeSmallTriangle(10);
         var wheelImage = MakeWheel(_size / 2, wheel);

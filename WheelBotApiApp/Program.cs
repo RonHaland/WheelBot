@@ -9,7 +9,6 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddHostedService<DiscordService>();
 builder.Services.AddSingleton<WheelService>();
-builder.Services.AddSingleton<CommandHandlers>();
 if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
     builder.Services.AddSingleton<IWheelGenerator, WheelGeneratorWindows>();
 else
