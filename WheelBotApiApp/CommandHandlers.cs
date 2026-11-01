@@ -12,7 +12,7 @@ public sealed class CommandHandlers
         _wheelGenerator = wheelGenerator;
     }
 
-    public async Task HandleSpin(SocketSlashCommand command, Wheel wheel)
+    public async Task HandleSpin(SocketSlashCommand command, string wheelId, Wheel wheel)
 	{
 		if (!wheel.HasOptions())
 		{
@@ -20,8 +20,8 @@ public sealed class CommandHandlers
 			return;
 		}
 
-        var animation = await _wheelGenerator.GenerateAnimation(wheel);
-        await command.FollowupWithFileAsync(animation.SpinningAnimation, "FullAnimation.gif");
+        var animation = await _wheelGenerator.GenerateAnimation(wheelId, wheel);
+        await command.FollowupWithFileAsync(animation.SpinningAnimation, "FullAnimation.webp");
 		await Task.Delay(7500);
 		await command.ModifyOriginalResponseAsync(c => c.Content = $"{command.User.Mention} spun '{animation.Result}'");
 		await animation.SpinningAnimation.DisposeAsync();
@@ -68,7 +68,7 @@ public sealed class CommandHandlers
         await command.FollowupAsync($"{command.User.Mention} removed {removed} from the wheel!{Environment.NewLine}The full list of options is now ['{string.Join("', '", wheel.Options)}']");
     }
 
-	public async Task HandleRandomize(SocketSlashCommand command, Wheel wheel)
+	public async Task HandleRandomize(SocketSlashCommand command, string wheelId, Wheel wheel)
     {
         if (!wheel.HasOptions())
         {
@@ -77,19 +77,19 @@ public sealed class CommandHandlers
         }
 
         wheel.RandomizeOrder();
-        var stream = await _wheelGenerator.CreatePreview(wheel);
+        var stream = await _wheelGenerator.CreatePreview(wheelId, wheel);
 
         await command.FollowupWithFileAsync(stream, "preview.png", $"The new order of options is ['{string.Join("', '", wheel.Options)}']");
     }
 
-	public async Task HandlePreveiw(SocketSlashCommand command, Wheel wheel)
+	public async Task HandlePreveiw(SocketSlashCommand command, string wheelId, Wheel wheel)
     {
         if (!wheel.HasOptions())
         {
             await command.FollowupAsync("No options on the wheel, add options using the '/add' command");
             return;
         }
-        var stream = await _wheelGenerator.CreatePreview(wheel);
+        var stream = await _wheelGenerator.CreatePreview(wheelId, wheel);
 
 		await command.FollowupWithFileAsync(stream, "preview.png", $"The full list of options is ['{string.Join("', '", wheel.Options)}']");
 

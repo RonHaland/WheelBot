@@ -12,14 +12,23 @@ public class DiscordService : BackgroundService
     private readonly IConfiguration _config;
     private readonly WheelService _wheelService;
     private readonly IWheelGenerator _wheelGenerator;
+    private readonly IWheelBaseImagePrepper _baseImagePrepService;
+    private readonly WheelBaseImageStore _baseImageStore;
     private readonly DiscordSocketClient _client;
     private readonly DiscordShardedClient _sharedClient;
 
-    public DiscordService(IConfiguration config, WheelService wheelService, IWheelGenerator wheelGenerator)
+    public DiscordService(
+        IConfiguration config,
+        WheelService wheelService,
+        IWheelGenerator wheelGenerator,
+        IWheelBaseImagePrepper baseImagePrepService,
+        WheelBaseImageStore baseImageStore)
     {
         _config = config;
         _wheelService = wheelService;
         _wheelGenerator = wheelGenerator;
+        _baseImagePrepService = baseImagePrepService;
+        _baseImageStore = baseImageStore;
         _client = new();
         _sharedClient = new();
     }
@@ -101,7 +110,8 @@ public class DiscordService : BackgroundService
         try
         {
             await command.DeferAsync();
-            var wheel = await _wheelService.GetWheel($"{command.GuildId?.ToString()}_{command.Channel.Name}");
+            var wheelId = $"{command.GuildId?.ToString()}_{command.Channel.Name}";
+            var wheel = await _wheelService.GetWheel(wheelId);
             if (wheel == null)
             {
                 await command.FollowupAsync("Could not get or create wheel");
@@ -112,7 +122,7 @@ public class DiscordService : BackgroundService
             switch (command.CommandName)
             {
                 case "spin":
-                    await commandHandlers.HandleSpin(command, wheel);
+                    await commandHandlers.HandleSpin(command, wheelId, wheel);
                     break;
                 case "add":
                     await commandHandlers.HandleAdd(command, wheel);
@@ -121,10 +131,10 @@ public class DiscordService : BackgroundService
                     await commandHandlers.HandleRemove(command, wheel);
                     break;
                 case "randomize":
-                    await commandHandlers.HandleRandomize(command, wheel);
+                    await commandHandlers.HandleRandomize(command, wheelId, wheel);
                     break;
                 case "preview":
-                    await commandHandlers.HandlePreveiw(command, wheel);
+                    await commandHandlers.HandlePreveiw(command, wheelId, wheel);
                     break;
                 case "reset":
                     await commandHandlers.HandleReset(command, wheel);
@@ -133,7 +143,20 @@ public class DiscordService : BackgroundService
                     await command.FollowupAsync("Unknown command");
                     break;
             }
-            await _wheelService.Save($"{command.GuildId?.ToString()}_{command.Channel.Name}", wheel);
+            await _wheelService.Save(wheelId, wheel);
+
+            switch (command.CommandName)
+            {
+                case "add":
+                case "rm":
+                case "randomize":
+                    if (wheel.HasOptions())
+                        _baseImagePrepService.Enqueue(wheelId, wheel.Options.ToList());
+                    break;
+                case "reset":
+                    await _baseImageStore.DeletePrefixAsync(wheelId);
+                    break;
+            }
         }
         catch (Exception e)
         {

@@ -2,7 +2,7 @@
 {
     public interface IWheelGenerator
     {
-        Task<AnimatedWheel> GenerateAnimation(Wheel wheel);
-        Task<Stream> CreatePreview(Wheel wheel);
+        Task<AnimatedWheel> GenerateAnimation(string wheelId, Wheel wheel);
+        Task<Stream> CreatePreview(string wheelId, Wheel wheel);
     }
 }

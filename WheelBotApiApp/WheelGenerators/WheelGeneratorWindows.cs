@@ -18,7 +18,7 @@ public class WheelGeneratorWindows : IWheelGenerator
     private readonly Random _random = new();
 
     [SupportedOSPlatform("windows10.0.18362")]
-    public async Task<Stream> CreatePreview(Wheel wheel)
+    public async Task<Stream> CreatePreview(string wheelId, Wheel wheel)
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             throw new Exception();
@@ -31,7 +31,7 @@ public class WheelGeneratorWindows : IWheelGenerator
     }
 
     [SupportedOSPlatform("windows10.0.18362")]
-    public async Task<AnimatedWheel> GenerateAnimation(Wheel wheel)
+    public async Task<AnimatedWheel> GenerateAnimation(string wheelId, Wheel wheel)
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             throw new Exception();
