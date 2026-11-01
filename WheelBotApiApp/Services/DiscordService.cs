@@ -1,5 +1,6 @@
 ﻿using Discord;
 using Discord.WebSocket;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using WheelBot;
 using WheelBotApiApp.WheelGenerators;
@@ -12,22 +13,20 @@ public class DiscordService : BackgroundService
     private readonly WheelService _wheelService;
     private readonly IWheelGenerator _wheelGenerator;
     private readonly IWheelBaseImagePrepper _baseImagePrepService;
-    private readonly WheelBaseImageStore _baseImageStore;
     private readonly DiscordSocketClient _client;
     private readonly DiscordShardedClient _sharedClient;
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _wheelCommandLocks = new();
 
     public DiscordService(
         IConfiguration config,
         WheelService wheelService,
         IWheelGenerator wheelGenerator,
-        IWheelBaseImagePrepper baseImagePrepService,
-        WheelBaseImageStore baseImageStore)
+        IWheelBaseImagePrepper baseImagePrepService)
     {
         _config = config;
         _wheelService = wheelService;
         _wheelGenerator = wheelGenerator;
         _baseImagePrepService = baseImagePrepService;
-        _baseImageStore = baseImageStore;
         _client = new();
         _sharedClient = new();
     }
@@ -100,61 +99,99 @@ public class DiscordService : BackgroundService
         }
     }
 
-    private async Task Handle(SocketSlashCommand command) => await Task.Run(() => HandleCommandAsync(command));
+    // Return immediately so Discord.Net can dispatch other interactions while this one runs.
+    private Task Handle(SocketSlashCommand command)
+    {
+        _ = HandleCommandAsync(command);
+        return Task.CompletedTask;
+    }
 
     private async Task HandleCommandAsync(SocketSlashCommand command)
     {
-        Stopwatch stopwatch = new();
-        stopwatch.Start();
+        var stopwatch = Stopwatch.StartNew();
+        var wheelId = $"{command.GuildId?.ToString()}_{command.Channel.Name}";
+        var wheelLock = _wheelCommandLocks.GetOrAdd(wheelId, _ => new SemaphoreSlim(1, 1));
+
         try
         {
             await command.DeferAsync();
-            var wheelId = $"{command.GuildId?.ToString()}_{command.Channel.Name}";
-            var wheel = await _wheelService.GetWheel(wheelId);
-            if (wheel == null)
-            {
-                await command.FollowupAsync("Could not get or create wheel");
-                throw new Exception("Could not get wheel");
-            }
-            var commandHandlers = new CommandHandlers(_wheelGenerator);
+            var commandHandlers = new CommandHandlers(_wheelGenerator, _baseImagePrepService);
 
-            switch (command.CommandName)
+            if (command.CommandName is "spin" or "preview")
             {
-                case "spin":
-                    await commandHandlers.HandleSpin(command, wheelId, wheel);
-                    break;
-                case "add":
-                    await commandHandlers.HandleAdd(command, wheel);
-                    break;
-                case "rm":
-                    await commandHandlers.HandleRemove(command, wheel);
-                    break;
-                case "randomize":
-                    await commandHandlers.HandleRandomize(command, wheelId, wheel);
-                    break;
-                case "preview":
-                    await commandHandlers.HandlePreveiw(command, wheelId, wheel);
-                    break;
-                case "reset":
-                    await commandHandlers.HandleReset(command, wheel);
-                    break;
-                default:
-                    await command.FollowupAsync("Unknown command");
-                    break;
-            }
-            await _wheelService.Save(wheelId, wheel);
+                Wheel wheelSnapshot;
+                await wheelLock.WaitAsync();
+                try
+                {
+                    var wheel = await _wheelService.GetWheel(wheelId);
+                    if (wheel == null)
+                    {
+                        await command.FollowupAsync("Could not get or create wheel");
+                        throw new Exception("Could not get wheel");
+                    }
 
-            switch (command.CommandName)
+                    wheelSnapshot = new Wheel(wheel.Options.ToList());
+                    if (command.CommandName == "spin")
+                        await _wheelService.Save(wheelId, wheel);
+                }
+                finally
+                {
+                    wheelLock.Release();
+                }
+
+                if (command.CommandName == "spin")
+                    await commandHandlers.HandleSpin(command, wheelId, wheelSnapshot);
+                else
+                    await commandHandlers.HandlePreveiw(command, wheelId, wheelSnapshot);
+
+                return;
+            }
+
+            await wheelLock.WaitAsync();
+            try
             {
-                case "add":
-                case "rm":
-                case "randomize":
-                    if (wheel.HasOptions())
+                var wheel = await _wheelService.GetWheel(wheelId);
+                if (wheel == null)
+                {
+                    await command.FollowupAsync("Could not get or create wheel");
+                    throw new Exception("Could not get wheel");
+                }
+
+                switch (command.CommandName)
+                {
+                    case "add":
+                        await commandHandlers.HandleAdd(command, wheel);
+                        break;
+                    case "rm":
+                        await commandHandlers.HandleRemove(command, wheel);
+                        break;
+                    case "randomize":
+                        await commandHandlers.HandleRandomize(command, wheelId, wheel);
+                        break;
+                    case "reset":
+                        await commandHandlers.HandleReset(command, wheel);
+                        break;
+                    default:
+                        await command.FollowupAsync("Unknown command");
+                        break;
+                }
+                await _wheelService.Save(wheelId, wheel);
+
+                switch (command.CommandName)
+                {
+                    case "add":
+                    case "rm":
+                    case "randomize":
                         _baseImagePrepService.Enqueue(wheelId, wheel.Options.ToList());
-                    break;
-                case "reset":
-                    await _baseImageStore.DeletePrefixAsync(wheelId);
-                    break;
+                        break;
+                    case "reset":
+                        _baseImagePrepService.Invalidate(wheelId);
+                        break;
+                }
+            }
+            finally
+            {
+                wheelLock.Release();
             }
         }
         catch (Exception e)
@@ -170,9 +207,14 @@ public class DiscordService : BackgroundService
                 Console.WriteLine(followupEx);
             }
         }
-
-        Console.WriteLine("Processed command {1} in {0} ms", stopwatch.ElapsedMilliseconds, command.CommandName);
-        stopwatch.Stop();
-        stopwatch.Reset();
+        finally
+        {
+            stopwatch.Stop();
+            Console.WriteLine(
+                "Processed command {0} for {1} in {2} ms",
+                command.CommandName,
+                wheelId,
+                stopwatch.ElapsedMilliseconds);
+        }
     }
 }

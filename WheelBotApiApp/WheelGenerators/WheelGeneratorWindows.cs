@@ -31,7 +31,7 @@ public class WheelGeneratorWindows : IWheelGenerator
     }
 
     [SupportedOSPlatform("windows10.0.18362")]
-    public async Task<AnimatedWheel> GenerateAnimation(string wheelId, Wheel wheel)
+    public async Task<AnimatedWheel> GenerateAnimation(string wheelId, Wheel wheel, CancellationToken cancellationToken = default)
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             throw new Exception();

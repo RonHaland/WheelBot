@@ -1,4 +1,5 @@
 ﻿using Discord.WebSocket;
+using WheelBotApiApp.Services;
 using WheelBotApiApp.WheelGenerators;
 
 namespace WheelBot;
@@ -6,10 +7,12 @@ namespace WheelBot;
 public sealed class CommandHandlers
 {
 	private readonly IWheelGenerator _wheelGenerator;
+	private readonly IWheelBaseImagePrepper _baseImagePrepper;
 
-	public CommandHandlers(IWheelGenerator wheelGenerator)
+	public CommandHandlers(IWheelGenerator wheelGenerator, IWheelBaseImagePrepper baseImagePrepper)
 	{
         _wheelGenerator = wheelGenerator;
+        _baseImagePrepper = baseImagePrepper;
     }
 
     public async Task HandleSpin(SocketSlashCommand command, string wheelId, Wheel wheel)
@@ -20,11 +23,19 @@ public sealed class CommandHandlers
 			return;
 		}
 
-        var animation = await _wheelGenerator.GenerateAnimation(wheelId, wheel);
-        await command.FollowupWithFileAsync(animation.SpinningAnimation, "FullAnimation.webp");
-		await Task.Delay(7500);
-		await command.ModifyOriginalResponseAsync(c => c.Content = $"{command.User.Mention} spun '{animation.Result}'");
-		await animation.SpinningAnimation.DisposeAsync();
+		try
+		{
+			var cancellationToken = _baseImagePrepper.GetGenerationToken(wheelId);
+			var animation = await _wheelGenerator.GenerateAnimation(wheelId, wheel, cancellationToken);
+			await command.FollowupWithFileAsync(animation.SpinningAnimation, "FullAnimation.webp");
+			await Task.Delay(7500, cancellationToken);
+			await command.ModifyOriginalResponseAsync(c => c.Content = $"{command.User.Mention} spun '{animation.Result}'");
+			await animation.SpinningAnimation.DisposeAsync();
+		}
+		catch (OperationCanceledException)
+		{
+			await command.FollowupAsync("Spin cancelled because the wheel options changed.");
+		}
     }
 
 	public async Task HandleAdd(SocketSlashCommand command, Wheel wheel)

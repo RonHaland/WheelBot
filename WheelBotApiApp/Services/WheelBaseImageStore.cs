@@ -24,33 +24,25 @@ public sealed class WheelBaseImageStore
         _container.CreateIfNotExists(PublicAccessType.None);
     }
 
-    public async Task<byte[]?> TryDownloadAsync(string wheelId, string contentHash, CancellationToken cancellationToken = default)
-    {
-        var blob = BlobClientFor(BlobPath(wheelId, contentHash));
-        if (!await blob.ExistsAsync(cancellationToken))
-            return null;
+    public Task<byte[]?> TryDownloadBaseAsync(string wheelId, string contentHash, CancellationToken cancellationToken = default) =>
+        TryDownloadBlobAsync(BaseBlobPath(wheelId, contentHash), cancellationToken);
 
-        var response = await blob.DownloadContentAsync(cancellationToken);
-        return response.Value.Content.ToArray();
-    }
+    public Task UploadBaseAsync(string wheelId, string contentHash, byte[] pngBytes, CancellationToken cancellationToken = default) =>
+        UploadBlobAsync(BaseBlobPath(wheelId, contentHash), pngBytes, "image/png", cancellationToken);
 
-    public async Task UploadAsync(string wheelId, string contentHash, byte[] pngBytes, CancellationToken cancellationToken = default)
-    {
-        var blob = BlobClientFor(BlobPath(wheelId, contentHash));
-        await using var stream = new MemoryStream(pngBytes);
-        await blob.UploadAsync(stream, new BlobUploadOptions
-        {
-            HttpHeaders = new BlobHttpHeaders { ContentType = "image/png" },
-        }, cancellationToken);
-    }
+    public Task<byte[]?> TryDownloadSpinAsync(string wheelId, string contentHash, int outcomeIndex, CancellationToken cancellationToken = default) =>
+        TryDownloadBlobAsync(SpinBlobPath(wheelId, contentHash, outcomeIndex), cancellationToken);
+
+    public Task UploadSpinAsync(string wheelId, string contentHash, int outcomeIndex, byte[] webpBytes, CancellationToken cancellationToken = default) =>
+        UploadBlobAsync(SpinBlobPath(wheelId, contentHash, outcomeIndex), webpBytes, "image/webp", cancellationToken);
 
     public async Task DeleteStaleExceptAsync(string wheelId, string currentContentHash, CancellationToken cancellationToken = default)
     {
-        var prefix = $"{HashWheelId(wheelId)}/";
-        var keepBlobName = BlobPath(wheelId, currentContentHash);
-        await foreach (var item in _container.GetBlobsAsync(new GetBlobsOptions { Prefix = prefix }, cancellationToken))
+        var wheelPrefix = $"{HashWheelId(wheelId)}/";
+        var keepPrefix = ContentPrefix(wheelId, currentContentHash);
+        await foreach (var item in _container.GetBlobsAsync(new GetBlobsOptions { Prefix = wheelPrefix }, cancellationToken))
         {
-            if (string.Equals(item.Name, keepBlobName, StringComparison.Ordinal))
+            if (item.Name.StartsWith(keepPrefix, StringComparison.Ordinal))
                 continue;
 
             await BlobClientFor(item.Name).DeleteIfExistsAsync(cancellationToken: cancellationToken);
@@ -64,6 +56,26 @@ public sealed class WheelBaseImageStore
         {
             await BlobClientFor(item.Name).DeleteIfExistsAsync(cancellationToken: cancellationToken);
         }
+    }
+
+    private async Task<byte[]?> TryDownloadBlobAsync(string blobPath, CancellationToken cancellationToken)
+    {
+        var blob = BlobClientFor(blobPath);
+        if (!await blob.ExistsAsync(cancellationToken))
+            return null;
+
+        var response = await blob.DownloadContentAsync(cancellationToken);
+        return response.Value.Content.ToArray();
+    }
+
+    private async Task UploadBlobAsync(string blobPath, byte[] bytes, string contentType, CancellationToken cancellationToken)
+    {
+        var blob = BlobClientFor(blobPath);
+        await using var stream = new MemoryStream(bytes);
+        await blob.UploadAsync(stream, new BlobUploadOptions
+        {
+            HttpHeaders = new BlobHttpHeaders { ContentType = contentType },
+        }, cancellationToken);
     }
 
     /// <summary>
@@ -104,8 +116,17 @@ public sealed class WheelBaseImageStore
         return new StorageSharedKeyCredential(accountName, accountKey);
     }
 
-    private static string BlobPath(string wheelId, string contentHash) =>
-        $"{HashWheelId(wheelId)}/{contentHash}.png";
+    private static string ContentPrefix(string wheelId, string contentHash) =>
+        $"{HashWheelId(wheelId)}/{contentHash}/";
+
+    private static string BaseBlobPath(string wheelId, string contentHash) =>
+        $"{ContentPrefix(wheelId, contentHash)}base.png";
+
+    // Bump when spin encode semantics change so cached WebPs from older pipelines are ignored.
+    private const string SpinBlobVersion = "v2";
+
+    private static string SpinBlobPath(string wheelId, string contentHash, int outcomeIndex) =>
+        $"{ContentPrefix(wheelId, contentHash)}spin-{SpinBlobVersion}-{outcomeIndex}.webp";
 
     private static string HashWheelId(string wheelId)
     {

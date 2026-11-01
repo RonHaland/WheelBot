@@ -19,6 +19,7 @@ else
     builder.Services.AddSingleton<WheelGeneratorMultiPlatform>();
     builder.Services.AddSingleton<IWheelGenerator>(sp => sp.GetRequiredService<WheelGeneratorMultiPlatform>());
     builder.Services.AddSingleton<IWheelBaseRenderer>(sp => sp.GetRequiredService<WheelGeneratorMultiPlatform>());
+    builder.Services.AddSingleton<IWheelAnimationPrecomputer>(sp => sp.GetRequiredService<WheelGeneratorMultiPlatform>());
     builder.Services.AddSingleton<WheelBaseImagePrepService>();
     builder.Services.AddSingleton<IWheelBaseImagePrepper>(sp => sp.GetRequiredService<WheelBaseImagePrepService>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<WheelBaseImagePrepService>());
