@@ -1,7 +1,6 @@
 ﻿using Discord;
 using Discord.WebSocket;
 using System.Diagnostics;
-using System.Reactive.Concurrency;
 using WheelBot;
 using WheelBotApiApp.WheelGenerators;
 

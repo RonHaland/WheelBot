@@ -19,7 +19,7 @@ RUN dotnet publish "./WheelBotApiApp.csproj" -c $BUILD_CONFIGURATION -o /app/pub
 FROM base AS final
 USER root
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg webp \
+ && apt-get install -y --no-install-recommends ffmpeg \
  && rm -rf /var/lib/apt/lists/*
 USER $APP_UID
 WORKDIR /app

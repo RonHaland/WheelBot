@@ -6,7 +6,9 @@ using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using System.Buffers.Binary;
 using System.Diagnostics;
+using System.Globalization;
 using System.Numerics;
+using System.Text;
 using WheelBotApiApp.Services;
 
 namespace WheelBotApiApp.WheelGenerators;
@@ -16,6 +18,7 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator, IWheelBaseRen
     private const float MinAngleStep = 0.5f;
     private const int MaxAnimationFrames = 180;
     private const double AnimationFramerate = 24;
+    private const int MaxFfmpegAngleSegments = 32;
     // Discord often ignores WebP loop metadata and keeps replaying attachments.
     // A long final-frame duration makes a forced loop look "stopped" on the result.
     private const int FinalFrameHoldMs = 60_000;
@@ -26,7 +29,7 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator, IWheelBaseRen
     private readonly int _size = 420;
     private readonly WheelBaseImageStore _baseImageStore;
     private readonly string _ffmpegPath;
-    private readonly Lazy<byte[]> _pointerRgba;
+    private readonly Lazy<byte[]> _pointerPngBytes;
 
     private DrawingOptions DrawingOptions => new()
     {
@@ -40,12 +43,12 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator, IWheelBaseRen
     {
         _baseImageStore = baseImageStore;
         _ffmpegPath = ResolveFfmpegPath(configuration);
-        _pointerRgba = new Lazy<byte[]>(() =>
+        _pointerPngBytes = new Lazy<byte[]>(() =>
         {
             using var pointer = MakeSmallTriangle(10);
-            var pixels = new byte[_size * _size * 4];
-            pointer.CopyPixelDataTo(pixels);
-            return pixels;
+            using var stream = new MemoryStream();
+            pointer.SaveAsPng(stream);
+            return stream.ToArray();
         });
         var fontPath = configuration["FontPath"];
         if (Directory.Exists(fontPath))
@@ -209,28 +212,10 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator, IWheelBaseRen
         var sw = Stopwatch.StartNew();
         var baseWheelBytes = await LoadBaseWheelBytesAsync(wheelId, wheel);
         var angles = BuildAngleList(rotation);
-        Console.WriteLine("Base wheel ready at {0} ms, {1} frames", sw.ElapsedMilliseconds, angles.Count);
+        var durationSeconds = angles.Count / AnimationFramerate;
+        Console.WriteLine("Base wheel ready at {0} ms, {1} frames, {2:F2}s duration", sw.ElapsedMilliseconds, angles.Count, durationSeconds);
 
-        using var decodedBase = Image.Load<Rgba32>(baseWheelBytes);
-        var baseRgba = new byte[_size * _size * 4];
-        decodedBase.CopyPixelDataTo(baseRgba);
-        var pointerRgba = _pointerRgba.Value;
-        var center = new Vector2(_size / 2f, _size / 2f);
-        var frameRgba = new byte[angles.Count][];
-        var pixelBytes = _size * _size * 4;
-
-        Parallel.For(0, angles.Count, new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount }, i =>
-        {
-            using var baseWheel = Image.LoadPixelData<Rgba32>(baseRgba, _size, _size);
-            using var pointer = Image.LoadPixelData<Rgba32>(pointerRgba, _size, _size);
-            using var frame = RenderRotatedFrame(baseWheel, pointer, angles[i], center);
-            var rgba = GC.AllocateUninitializedArray<byte>(pixelBytes);
-            frame.CopyPixelDataTo(rgba);
-            frameRgba[i] = rgba;
-        });
-
-        Console.WriteLine("All frames generated at {0} ms", sw.ElapsedMilliseconds);
-        var webpStream = await EncodeWebpAsync(frameRgba, _size, _size, _ffmpegPath);
+        var webpStream = await EncodeSpinWebpViaFfmpegAsync(baseWheelBytes, _pointerPngBytes.Value, angles);
         Console.WriteLine("WebP encoded at {0} ms, size: {1}", sw.ElapsedMilliseconds, webpStream.Length);
         sw.Stop();
         webpStream.Position = 0;
@@ -266,76 +251,194 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator, IWheelBaseRen
         return angles;
     }
 
-    private Image<Rgba32> RenderRotatedFrame(Image<Rgba32> baseWheel, Image<Rgba32> pointer, float degrees, Vector2 center)
+    private static IReadOnlyList<float> SubsampleAnglesForFfmpeg(IReadOnlyList<float> angles)
     {
-        // Keep destination at wheel size. Rotate() alone expands to the bounding diagonal and is much slower.
-        var matrix = Matrix3x2.CreateRotation(degrees * MathF.PI / 180f, center);
-        var frame = baseWheel.Clone(ctx =>
-            ctx.Transform(
-                new Rectangle(0, 0, _size, _size),
-                matrix,
-                new Size(_size, _size),
-                KnownResamplers.Triangle));
-        frame.Mutate(ctx => ctx.DrawImage(pointer, 1f));
-        return frame;
-    }
+        if (angles.Count <= MaxFfmpegAngleSegments)
+            return angles;
 
-    private FontFamily ResolvePrimaryFont()
-    {
-        if (_collection.TryGet("Roboto", out var roboto))
-            return roboto;
-
-        return _collection.Families.First();
-    }
-
-    private IReadOnlyList<FontFamily> ResolveEmojiFallbackFonts()
-    {
-        var fallbacks = new List<FontFamily>();
-        if (_collection.TryGet("Twemoji Mozilla", out var twemoji))
-            fallbacks.Add(twemoji);
-        if (_collection.TryGet("Noto Color Emoji", out var noto))
-            fallbacks.Add(noto);
-        return fallbacks;
-    }
-
-    private static string ResolveFfmpegPath(IConfiguration configuration)
-    {
-        var configured = configuration["FfmpegPath"];
-        if (!string.IsNullOrWhiteSpace(configured))
-            return configured;
-
-        if (OperatingSystem.IsMacOS())
+        var sampled = new List<float>(MaxFfmpegAngleSegments);
+        for (var s = 0; s < MaxFfmpegAngleSegments; s++)
         {
-            string[] candidates =
-            [
-                "/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg",
-                "/usr/local/opt/ffmpeg-full/bin/ffmpeg",
-            ];
-            foreach (var candidate in candidates)
+            var index = (int)Math.Round(s * (angles.Count - 1) / (double)(MaxFfmpegAngleSegments - 1));
+            sampled.Add(angles[index]);
+        }
+
+        return sampled;
+    }
+
+    private static string BuildFfmpegRotateAngleExpression(IReadOnlyList<float> keyframeAngles, double durationSeconds)
+    {
+        if (keyframeAngles.Count < 2)
+            throw new InvalidOperationException("Spin animation requires at least two angle keyframes.");
+
+        var inv = CultureInfo.InvariantCulture;
+        var segmentCount = keyframeAngles.Count - 1;
+
+        string Segment(int index)
+        {
+            var t0 = index / (double)segmentCount * durationSeconds;
+            var t1 = (index + 1) / (double)segmentCount * durationSeconds;
+            var a0 = keyframeAngles[index] * Math.PI / 180d;
+            var a1 = keyframeAngles[index + 1] * Math.PI / 180d;
+            return $"{a0.ToString(inv)}+({a1.ToString(inv)}-{a0.ToString(inv)})*((t-{t0.ToString(inv)})/({t1.ToString(inv)}-{t0.ToString(inv)}))";
+        }
+
+        var expression = Segment(segmentCount - 1);
+        for (var index = segmentCount - 2; index >= 0; index--)
+        {
+            var tBreak = (index + 1) / (double)segmentCount * durationSeconds;
+            expression = $"if(lt(t,{tBreak.ToString(inv)}),{Segment(index)},{expression})";
+        }
+
+        return expression;
+    }
+
+    private async Task<MemoryStream> EncodeSpinWebpViaFfmpegAsync(byte[] baseWheelPng, byte[] pointerPng, IReadOnlyList<float> angles)
+    {
+        var durationSeconds = angles.Count / AnimationFramerate;
+        var keyframes = SubsampleAnglesForFfmpeg(angles);
+        var rotateExpression = BuildFfmpegRotateAngleExpression(keyframes, durationSeconds);
+        var duration = durationSeconds.ToString(CultureInfo.InvariantCulture);
+        var framerate = AnimationFramerate.ToString(CultureInfo.InvariantCulture);
+        var frameCount = angles.Count.ToString(CultureInfo.InvariantCulture);
+
+        var tempDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"wheelbot-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+
+        var basePath = System.IO.Path.Combine(tempDir, "base.png");
+        var pointerPath = System.IO.Path.Combine(tempDir, "pointer.png");
+        var outputPath = System.IO.Path.Combine(tempDir, "spin.webp");
+
+        try
+        {
+            await File.WriteAllBytesAsync(basePath, baseWheelPng);
+            await File.WriteAllBytesAsync(pointerPath, pointerPng);
+
+            var filterComplex = new StringBuilder();
+            filterComplex.Append(CultureInfo.InvariantCulture, $"[0:v]format=rgba,fps={framerate},rotate=a='{rotateExpression}':ow={_size}:oh={_size}:c=none:fillcolor=black@0[rot];");
+            filterComplex.Append("[1:v]format=rgba[p];[rot][p]overlay=0:0:format=auto[out]");
+
+            var stderr = await RunFfmpegSpinEncodeAsync(
+                basePath,
+                pointerPath,
+                outputPath,
+                filterComplex.ToString(),
+                duration,
+                frameCount,
+                encoder: "libwebp_anim");
+
+            if (!File.Exists(outputPath) || !IsValidAnimatedWebp(await File.ReadAllBytesAsync(outputPath)))
             {
-                if (File.Exists(candidate))
-                    return candidate;
+                Console.WriteLine("libwebp_anim failed or produced invalid output; retrying with libwebp: {0}", stderr.Trim());
+                stderr = await RunFfmpegSpinEncodeAsync(
+                    basePath,
+                    pointerPath,
+                    outputPath,
+                    filterComplex.ToString(),
+                    duration,
+                    frameCount,
+                    encoder: "libwebp");
+            }
+
+            if (!File.Exists(outputPath))
+            {
+                throw new InvalidOperationException($"ffmpeg WebP encode failed: {stderr.Trim()}");
+            }
+
+            var bytes = await File.ReadAllBytesAsync(outputPath);
+            if (!IsValidAnimatedWebp(bytes))
+            {
+                throw new InvalidOperationException("ffmpeg produced output that is not a valid animated WebP.");
+            }
+
+            var stream = new MemoryStream(bytes);
+            PatchAnimatedWebpPlayback(stream, loopCount: 1, lastFrameDurationMs: FinalFrameHoldMs);
+            return stream;
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(tempDir, recursive: true);
+            }
+            catch
+            {
+                // best-effort cleanup
             }
         }
-
-        return "ffmpeg";
     }
 
-    private static async Task<MemoryStream> EncodeWebpAsync(byte[][] frameRgba, int width, int height, string ffmpegPath)
+    private async Task<string> RunFfmpegSpinEncodeAsync(
+        string basePath,
+        string pointerPath,
+        string outputPath,
+        string filterComplex,
+        string duration,
+        string frameCount,
+        string encoder)
     {
-        var ffmpegResult = await TryEncodeWebpViaFfmpegAsync(frameRgba, width, height, ffmpegPath);
-        if (ffmpegResult is not null && IsValidAnimatedWebp(ffmpegResult))
+        if (File.Exists(outputPath))
+            File.Delete(outputPath);
+
+        var psi = new ProcessStartInfo
         {
-            PatchAnimatedWebpPlayback(ffmpegResult, loopCount: 1, lastFrameDurationMs: FinalFrameHoldMs);
-            return ffmpegResult;
+            FileName = _ffmpegPath,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        psi.ArgumentList.Add("-hide_banner");
+        psi.ArgumentList.Add("-loglevel");
+        psi.ArgumentList.Add("error");
+        psi.ArgumentList.Add("-y");
+        psi.ArgumentList.Add("-loop");
+        psi.ArgumentList.Add("1");
+        psi.ArgumentList.Add("-t");
+        psi.ArgumentList.Add(duration);
+        psi.ArgumentList.Add("-i");
+        psi.ArgumentList.Add(basePath);
+        psi.ArgumentList.Add("-loop");
+        psi.ArgumentList.Add("1");
+        psi.ArgumentList.Add("-t");
+        psi.ArgumentList.Add(duration);
+        psi.ArgumentList.Add("-i");
+        psi.ArgumentList.Add(pointerPath);
+        psi.ArgumentList.Add("-filter_complex");
+        psi.ArgumentList.Add(filterComplex);
+        psi.ArgumentList.Add("-map");
+        psi.ArgumentList.Add("[out]");
+        psi.ArgumentList.Add("-frames:v");
+        psi.ArgumentList.Add(frameCount);
+        psi.ArgumentList.Add("-an");
+        psi.ArgumentList.Add("-c:v");
+        psi.ArgumentList.Add(encoder);
+        psi.ArgumentList.Add("-loop");
+        psi.ArgumentList.Add("1");
+        psi.ArgumentList.Add("-preset");
+        psi.ArgumentList.Add("default");
+        psi.ArgumentList.Add("-compression_level");
+        psi.ArgumentList.Add("1");
+        psi.ArgumentList.Add("-q:v");
+        psi.ArgumentList.Add("70");
+        psi.ArgumentList.Add("-pix_fmt");
+        psi.ArgumentList.Add("yuva420p");
+        psi.ArgumentList.Add("-f");
+        psi.ArgumentList.Add("webp");
+        psi.ArgumentList.Add(outputPath);
+
+        using var process = Process.Start(psi)
+            ?? throw new InvalidOperationException("Failed to start ffmpeg for WebP spin encoding.");
+
+        var stderr = await process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+
+        if (process.ExitCode != 0)
+        {
+            Console.WriteLine("ffmpeg WebP encode failed with {0} ({1}): {2}", encoder, process.ExitCode, stderr.Trim());
         }
 
-        ffmpegResult?.Dispose();
-        Console.WriteLine("ffmpeg WebP output invalid or failed; falling back to img2webp");
-
-        var fallback = await EncodeWebpViaImg2WebpAsync(frameRgba, width, height);
-        PatchAnimatedWebpPlayback(fallback, loopCount: 1, lastFrameDurationMs: FinalFrameHoldMs);
-        return fallback;
+        return stderr;
     }
 
     /// <summary>
@@ -395,16 +498,6 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator, IWheelBaseRen
         stream.Position = 0;
     }
 
-    private static bool IsValidAnimatedWebp(MemoryStream stream)
-    {
-        if (!stream.TryGetBuffer(out var segment))
-        {
-            return IsValidAnimatedWebp((ReadOnlySpan<byte>)stream.ToArray());
-        }
-
-        return IsValidAnimatedWebp(segment.AsSpan(0, (int)stream.Length));
-    }
-
     private static bool IsValidAnimatedWebp(ReadOnlySpan<byte> data)
     {
         if (data.Length < 16 || data[0] != (byte)'R' || data[1] != (byte)'I')
@@ -413,140 +506,38 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator, IWheelBaseRen
         return data.IndexOf("ANIM"u8) >= 0 && data.IndexOf("ANMF"u8) >= 0;
     }
 
-    private static async Task<MemoryStream?> TryEncodeWebpViaFfmpegAsync(
-        byte[][] frameRgba,
-        int width,
-        int height,
-        string ffmpegPath)
+    private FontFamily ResolvePrimaryFont()
     {
-        var outputStream = new MemoryStream();
-        var framerate = AnimationFramerate.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        var psi = new ProcessStartInfo
-        {
-            FileName = ffmpegPath,
-            // Raw RGBA avoids decoding PNGs inside ffmpeg; low compression_level favors speed.
-            Arguments =
-                $"-hide_banner -loglevel error -y -f rawvideo -pix_fmt rgba -s {width}x{height} -framerate {framerate} -i - " +
-                // -loop 1 = play once (0 = infinite), same idea as a non-looping GIF.
-                $"-frames:v {frameRgba.Length} -an -c:v libwebp_anim -loop 1 -preset default -compression_level 1 -q:v 70 " +
-                $"-pix_fmt yuva420p -f webp pipe:1",
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
+        if (_collection.TryGet("Roboto", out var roboto))
+            return roboto;
 
-        using var process = Process.Start(psi);
-        if (process is null)
-            return null;
-
-        var writeTask = WriteRawFramesToStdinAsync(process, frameRgba);
-        var readTask = process.StandardOutput.BaseStream.CopyToAsync(outputStream);
-        var stderrTask = process.StandardError.ReadToEndAsync();
-
-        await writeTask;
-        await readTask;
-        var stderr = await stderrTask;
-        await process.WaitForExitAsync();
-
-        if (process.ExitCode != 0)
-        {
-            Console.WriteLine("ffmpeg WebP encode failed ({0}): {1}", process.ExitCode, stderr.Trim());
-            outputStream.Dispose();
-            return null;
-        }
-
-        outputStream.Position = 0;
-        return outputStream;
+        return _collection.Families.First();
     }
 
-    private static async Task WriteRawFramesToStdinAsync(Process process, byte[][] frameRgba)
+    private IReadOnlyList<FontFamily> ResolveEmojiFallbackFonts()
     {
-        await using var stdin = process.StandardInput.BaseStream;
-        foreach (var frame in frameRgba)
-        {
-            await stdin.WriteAsync(frame);
-        }
+        var fallbacks = new List<FontFamily>();
+        if (_collection.TryGet("Twemoji Mozilla", out var twemoji))
+            fallbacks.Add(twemoji);
+        if (_collection.TryGet("Noto Color Emoji", out var noto))
+            fallbacks.Add(noto);
+        return fallbacks;
     }
 
-    private static async Task<MemoryStream> EncodeWebpViaImg2WebpAsync(byte[][] frameRgba, int width, int height)
+    private static string ResolveFfmpegPath(IConfiguration configuration)
     {
-        var tempDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"wheelbot-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(tempDir);
+        var configured = configuration["FfmpegPath"];
+        if (!string.IsNullOrWhiteSpace(configured))
+            return configured;
 
-        try
-        {
-            var framePaths = new string[frameRgba.Length];
-            for (var i = 0; i < frameRgba.Length; i++)
-            {
-                framePaths[i] = System.IO.Path.Combine(tempDir, $"frame_{i:D4}.png");
-                using var image = Image.LoadPixelData<Rgba32>(frameRgba[i], width, height);
-                await image.SaveAsPngAsync(framePaths[i]);
-            }
-
-            var outputPath = System.IO.Path.Combine(tempDir, "animation.webp");
-            var frameDelayMs = Math.Max(1, (int)Math.Round(1000 / AnimationFramerate));
-            var args = new List<string> { "-loop", "1", "-d", frameDelayMs.ToString() };
-            for (var i = 0; i < framePaths.Length; i++)
-            {
-                if (i == framePaths.Length - 1)
-                    args.AddRange(["-d", FinalFrameHoldMs.ToString()]);
-                args.Add(framePaths[i]);
-            }
-            args.AddRange(["-o", outputPath]);
-
-            var psi = new ProcessStartInfo
-            {
-                FileName = ResolveImg2WebpPath(),
-                ArgumentList = { },
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
-            foreach (var arg in args)
-                psi.ArgumentList.Add(arg);
-
-            using var process = Process.Start(psi)
-                ?? throw new InvalidOperationException("Failed to start img2webp. Install the webp package (e.g. brew install webp).");
-
-            var stderr = await process.StandardError.ReadToEndAsync();
-            await process.WaitForExitAsync();
-            if (process.ExitCode != 0 || !File.Exists(outputPath))
-            {
-                throw new InvalidOperationException($"img2webp failed ({process.ExitCode}): {stderr.Trim()}");
-            }
-
-            var bytes = await File.ReadAllBytesAsync(outputPath);
-            if (!IsValidAnimatedWebp(bytes))
-            {
-                throw new InvalidOperationException("img2webp produced output that is not a valid animated WebP.");
-            }
-
-            return new MemoryStream(bytes);
-        }
-        finally
-        {
-            try
-            {
-                Directory.Delete(tempDir, recursive: true);
-            }
-            catch
-            {
-                // best-effort cleanup
-            }
-        }
-    }
-
-    private static string ResolveImg2WebpPath()
-    {
         if (OperatingSystem.IsMacOS())
         {
             string[] candidates =
             [
-                "/opt/homebrew/bin/img2webp",
-                "/usr/local/bin/img2webp",
+                "/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg",
+                "/usr/local/opt/ffmpeg-full/bin/ffmpeg",
+                "/opt/homebrew/bin/ffmpeg",
+                "/usr/local/bin/ffmpeg",
             ];
             foreach (var candidate in candidates)
             {
@@ -555,7 +546,7 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator, IWheelBaseRen
             }
         }
 
-        return "img2webp";
+        return "ffmpeg";
     }
 
     private static double Factor(float x, float fullRotation) => ((fullRotation - (1 / fullRotation) * float.Pow(x, 2)) / fullRotation);

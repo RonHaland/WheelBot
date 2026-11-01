@@ -46,7 +46,7 @@ public sealed class WheelBaseImageStore
     {
         var prefix = $"{HashWheelId(wheelId)}/";
         var keepBlobName = BlobPath(wheelId, currentContentHash);
-        await foreach (var item in _container.GetBlobsAsync(prefix: prefix, cancellationToken: cancellationToken))
+        await foreach (var item in _container.GetBlobsAsync(new GetBlobsOptions { Prefix = prefix }, cancellationToken))
         {
             if (string.Equals(item.Name, keepBlobName, StringComparison.Ordinal))
                 continue;
@@ -58,7 +58,7 @@ public sealed class WheelBaseImageStore
     public async Task DeletePrefixAsync(string wheelId, CancellationToken cancellationToken = default)
     {
         var prefix = $"{HashWheelId(wheelId)}/";
-        await foreach (var item in _container.GetBlobsAsync(prefix: prefix, cancellationToken: cancellationToken))
+        await foreach (var item in _container.GetBlobsAsync(new GetBlobsOptions { Prefix = prefix }, cancellationToken))
         {
             await BlobClientFor(item.Name).DeleteIfExistsAsync(cancellationToken: cancellationToken);
         }
