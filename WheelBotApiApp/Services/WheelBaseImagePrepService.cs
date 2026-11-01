@@ -37,15 +37,25 @@ public sealed class WheelBaseImagePrepService : BackgroundService, IWheelBaseIma
         {
             try
             {
-                if (!_latestHashByWheelId.TryGetValue(job.WheelId, out var latest) || latest != job.ContentHash)
+                if (!IsLatest(job))
                     continue;
 
                 if (await _store.TryDownloadAsync(job.WheelId, job.ContentHash, stoppingToken) is not null)
+                {
+                    if (IsLatest(job))
+                        await _store.DeleteStaleExceptAsync(job.WheelId, job.ContentHash, stoppingToken);
                     continue;
+                }
 
                 var wheel = new Wheel(job.Options);
                 var pngBytes = _renderer.RenderBaseWheelPng(wheel);
+
+                // Re-check after the slow render so we never upload/delete for a superseded wheel.
+                if (!IsLatest(job))
+                    continue;
+
                 await _store.UploadAsync(job.WheelId, job.ContentHash, pngBytes, stoppingToken);
+                await _store.DeleteStaleExceptAsync(job.WheelId, job.ContentHash, stoppingToken);
                 Console.WriteLine("Prepped wheel base blob for {0} ({1} bytes)", job.WheelId, pngBytes.Length);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -54,6 +64,9 @@ public sealed class WheelBaseImagePrepService : BackgroundService, IWheelBaseIma
             }
         }
     }
+
+    private bool IsLatest(PrepJob job) =>
+        _latestHashByWheelId.TryGetValue(job.WheelId, out var latest) && latest == job.ContentHash;
 
     private sealed record PrepJob(string WheelId, string ContentHash, List<string> Options);
 }

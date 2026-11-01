@@ -52,7 +52,7 @@ public sealed class CommandHandlers
 		if (option.Name == "index")
 		{
 			var value = int.Parse(option.Value.ToString() ?? "");
-			if (value < 0 || value > wheel.Options.Count)
+			if (value < 0 || value >= wheel.Options.Count)
 			{
 				await command.FollowupAsync("index out of range");
 				return;
@@ -77,7 +77,7 @@ public sealed class CommandHandlers
         }
 
         wheel.RandomizeOrder();
-        var stream = await _wheelGenerator.CreatePreview(wheelId, wheel);
+        await using var stream = await _wheelGenerator.CreatePreview(wheelId, wheel);
 
         await command.FollowupWithFileAsync(stream, "preview.png", $"The new order of options is ['{string.Join("', '", wheel.Options)}']");
     }
@@ -89,7 +89,7 @@ public sealed class CommandHandlers
             await command.FollowupAsync("No options on the wheel, add options using the '/add' command");
             return;
         }
-        var stream = await _wheelGenerator.CreatePreview(wheelId, wheel);
+        await using var stream = await _wheelGenerator.CreatePreview(wheelId, wheel);
 
 		await command.FollowupWithFileAsync(stream, "preview.png", $"The full list of options is ['{string.Join("', '", wheel.Options)}']");
 

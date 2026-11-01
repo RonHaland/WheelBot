@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
 
@@ -31,13 +33,15 @@ public sealed class WheelBaseImageStore
     {
         var blob = _container.GetBlobClient(BlobPath(wheelId, contentHash));
         await using var stream = new MemoryStream(pngBytes);
-        await blob.UploadAsync(stream, new BlobHttpHeaders { ContentType = "image/png" }, cancellationToken: cancellationToken);
-        await DeleteStaleExceptAsync(wheelId, contentHash, cancellationToken);
+        await blob.UploadAsync(stream, new BlobUploadOptions
+        {
+            HttpHeaders = new BlobHttpHeaders { ContentType = "image/png" },
+        }, cancellationToken);
     }
 
-    private async Task DeleteStaleExceptAsync(string wheelId, string currentContentHash, CancellationToken cancellationToken)
+    public async Task DeleteStaleExceptAsync(string wheelId, string currentContentHash, CancellationToken cancellationToken = default)
     {
-        var prefix = $"{SanitizeWheelId(wheelId)}/";
+        var prefix = $"{HashWheelId(wheelId)}/";
         var keepBlobName = BlobPath(wheelId, currentContentHash);
         await foreach (var item in _container.GetBlobsAsync(prefix: prefix, cancellationToken: cancellationToken))
         {
@@ -50,7 +54,7 @@ public sealed class WheelBaseImageStore
 
     public async Task DeletePrefixAsync(string wheelId, CancellationToken cancellationToken = default)
     {
-        var prefix = $"{SanitizeWheelId(wheelId)}/";
+        var prefix = $"{HashWheelId(wheelId)}/";
         await foreach (var item in _container.GetBlobsAsync(prefix: prefix, cancellationToken: cancellationToken))
         {
             await _container.DeleteBlobIfExistsAsync(item.Name, cancellationToken: cancellationToken);
@@ -58,26 +62,11 @@ public sealed class WheelBaseImageStore
     }
 
     private static string BlobPath(string wheelId, string contentHash) =>
-        $"{SanitizeWheelId(wheelId)}/{contentHash}.png";
+        $"{HashWheelId(wheelId)}/{contentHash}.png";
 
-    private static string SanitizeWheelId(string wheelId)
+    private static string HashWheelId(string wheelId)
     {
-        if (string.IsNullOrEmpty(wheelId))
-            return "_";
-
-        Span<char> buffer = wheelId.Length <= 256
-            ? stackalloc char[wheelId.Length]
-            : new char[wheelId.Length];
-        var written = 0;
-        foreach (var c in wheelId)
-        {
-            buffer[written++] = IsSafeBlobPathChar(c) ? c : '_';
-        }
-
-        var sanitized = new string(buffer[..written]);
-        return string.IsNullOrEmpty(sanitized) ? "_" : sanitized;
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(wheelId ?? string.Empty));
+        return Convert.ToHexString(hash)[..32].ToLowerInvariant();
     }
-
-    private static bool IsSafeBlobPathChar(char c) =>
-        char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.';
 }

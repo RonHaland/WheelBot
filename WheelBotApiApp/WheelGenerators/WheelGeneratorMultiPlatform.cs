@@ -106,8 +106,8 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator, IWheelBaseRen
         var sweepAngle = 360f / numSlices;
         var image = new Image<Rgba32>(r * 2, r * 2);
         var center = new PointF(r, r);
-        var font = _collection.Get("Roboto").CreateFont(15, FontStyle.Regular);
-        var emojiFontFamily = _collection.Get("Twemoji Mozilla");
+        var font = ResolvePrimaryFont().CreateFont(15, FontStyle.Regular);
+        var emojiFallbacks = ResolveEmojiFallbackFonts();
 
         for (var i = numSlices - 1; i >= 0; i--)
         {
@@ -133,7 +133,7 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator, IWheelBaseRen
                 Origin = textPosition,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
-                FallbackFontFamilies = [emojiFontFamily],
+                FallbackFontFamilies = emojiFallbacks,
             };
             var drawingOpts = new DrawingOptions
             {
@@ -261,6 +261,24 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator, IWheelBaseRen
             ctx.DrawImage(pointer, new Point(0, 0), 1f);
         });
         return frame;
+    }
+
+    private FontFamily ResolvePrimaryFont()
+    {
+        if (_collection.TryGet("Roboto", out var roboto))
+            return roboto;
+
+        return _collection.Families.First();
+    }
+
+    private IReadOnlyList<FontFamily> ResolveEmojiFallbackFonts()
+    {
+        var fallbacks = new List<FontFamily>();
+        if (_collection.TryGet("Twemoji Mozilla", out var twemoji))
+            fallbacks.Add(twemoji);
+        if (_collection.TryGet("Noto Color Emoji", out var noto))
+            fallbacks.Add(noto);
+        return fallbacks;
     }
 
     private static string ResolveFfmpegPath(IConfiguration configuration)

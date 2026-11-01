@@ -161,8 +161,15 @@ public class DiscordService : BackgroundService
         catch (Exception e)
         {
             Console.WriteLine(e);
-            await command.FollowupAsync("Error :(");
-            throw;
+            try
+            {
+                await command.FollowupAsync("Error :(");
+            }
+            catch (Exception followupEx)
+            {
+                // Already responded (e.g. file upload succeeded, then a later step failed).
+                Console.WriteLine(followupEx);
+            }
         }
 
         Console.WriteLine("Processed command {1} in {0} ms", stopwatch.ElapsedMilliseconds, command.CommandName);
