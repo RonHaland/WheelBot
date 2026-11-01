@@ -7,6 +7,8 @@ env:
   BASE_CONNECTION_STRING: ${{ secrets.STORAGE_CONNECTION_STRING }}
   STORAGE_CONNECTION_STRING: ''
   PROD_PORT: 8888
+  # Any port is fine: WheelBaseImageStore builds BlobClient from the full container URI
+  # so it does not depend on the Azure SDK path-style port whitelist.
   PROD_STORAGE_PORT: 10500
 
 jobs:
@@ -53,8 +55,15 @@ jobs:
             TABLE_PORT=$(($STORAGE_PORT + 2))
             mkdir -p storage/wheel
             echo "setting up storage for $Local_env using ports($BLOB_PORT $QUEUE_PORT $TABLE_PORT) based on port $STORAGE_PORT"
-            sudo docker container inspect wheelazurite || \
-              (sudo docker pull mcr.microsoft.com/azure-storage/azurite && \
+            # Recreate when missing or not already publishing the expected blob port (SDK path-style whitelist).
+            NEEDS_AZURITE=0
+            sudo docker container inspect wheelazurite >/dev/null 2>&1 || NEEDS_AZURITE=1
+            if [ "$NEEDS_AZURITE" -eq 0 ]; then
+              sudo docker port wheelazurite | grep -q ":${BLOB_PORT}$" || NEEDS_AZURITE=1
+            fi
+            if [ "$NEEDS_AZURITE" -eq 1 ]; then
+              sudo docker rm -f wheelazurite >/dev/null 2>&1 || true
+              sudo docker pull mcr.microsoft.com/azure-storage/azurite
               sudo docker run -d \
                 --name wheelazurite \
                 --restart unless-stopped \
@@ -65,7 +74,8 @@ jobs:
                 -p $TABLE_PORT:$TABLE_PORT \
                 mcr.microsoft.com/azure-storage/azurite \
                 azurite -l /data --blobPort $BLOB_PORT --queuePort $QUEUE_PORT --tablePort $TABLE_PORT \
-                --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0)
+                --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0
+            fi
           EOF
 
       - name: set storage connection string
