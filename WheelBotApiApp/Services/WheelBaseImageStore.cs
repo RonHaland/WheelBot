@@ -60,6 +60,24 @@ public sealed class WheelBaseImageStore
     private static string BlobPath(string wheelId, string contentHash) =>
         $"{SanitizeWheelId(wheelId)}/{contentHash}.png";
 
-    private static string SanitizeWheelId(string wheelId) =>
-        wheelId.Replace('/', '_').Replace('\\', '_');
+    private static string SanitizeWheelId(string wheelId)
+    {
+        if (string.IsNullOrEmpty(wheelId))
+            return "_";
+
+        Span<char> buffer = wheelId.Length <= 256
+            ? stackalloc char[wheelId.Length]
+            : new char[wheelId.Length];
+        var written = 0;
+        foreach (var c in wheelId)
+        {
+            buffer[written++] = IsSafeBlobPathChar(c) ? c : '_';
+        }
+
+        var sanitized = new string(buffer[..written]);
+        return string.IsNullOrEmpty(sanitized) ? "_" : sanitized;
+    }
+
+    private static bool IsSafeBlobPathChar(char c) =>
+        char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.';
 }
