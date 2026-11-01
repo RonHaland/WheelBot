@@ -61,9 +61,13 @@ jobs:
             if [ "$NEEDS_AZURITE" -eq 0 ]; then
               sudo docker port wheelazurite | grep -q ":${BLOB_PORT}$" || NEEDS_AZURITE=1
             fi
+            if [ "$NEEDS_AZURITE" -eq 0 ]; then
+              CURRENT_IMAGE=$(sudo docker inspect wheelazurite --format '{{.Config.Image}}' 2>/dev/null || echo "")
+              [ "$CURRENT_IMAGE" = "mcr.microsoft.com/azure-storage/azurite:3.37.0" ] || NEEDS_AZURITE=1
+            fi
             if [ "$NEEDS_AZURITE" -eq 1 ]; then
               sudo docker rm -f wheelazurite >/dev/null 2>&1 || true
-              sudo docker pull mcr.microsoft.com/azure-storage/azurite
+              sudo docker pull mcr.microsoft.com/azure-storage/azurite:3.37.0
               sudo docker run -d \
                 --name wheelazurite \
                 --restart unless-stopped \
@@ -72,9 +76,9 @@ jobs:
                 -p $BLOB_PORT:$BLOB_PORT \
                 -p $QUEUE_PORT:$QUEUE_PORT \
                 -p $TABLE_PORT:$TABLE_PORT \
-                mcr.microsoft.com/azure-storage/azurite \
+                mcr.microsoft.com/azure-storage/azurite:3.37.0 \
                 azurite -l /data --blobPort $BLOB_PORT --queuePort $QUEUE_PORT --tablePort $TABLE_PORT \
-                --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0
+                --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0 --skipApiVersionCheck
             fi
           EOF
 

@@ -11,13 +11,15 @@ public sealed class WheelBaseImageStore
     private const string ContainerName = "wheel-bases";
     private readonly BlobContainerClient _container;
     private readonly StorageSharedKeyCredential _credential;
+    private readonly BlobClientOptions _blobClientOptions;
 
     public WheelBaseImageStore(IConfiguration configuration)
     {
         var connectionString = configuration["WheelConnStr"]
             ?? throw new InvalidOperationException("WheelConnStr is not configured.");
         _credential = ParseSharedKeyCredential(connectionString);
-        var service = new BlobServiceClient(connectionString);
+        _blobClientOptions = AzuriteStorage.CreateBlobClientOptions(connectionString);
+        var service = new BlobServiceClient(connectionString, _blobClientOptions);
         _container = service.GetBlobContainerClient(ContainerName);
         _container.CreateIfNotExists(PublicAccessType.None);
     }
@@ -73,7 +75,7 @@ public sealed class WheelBaseImageStore
     private BlobClient BlobClientFor(string blobName)
     {
         var uri = new Uri($"{_container.Uri.AbsoluteUri.TrimEnd('/')}/{blobName.TrimStart('/')}");
-        return new BlobClient(uri, _credential);
+        return new BlobClient(uri, _credential, _blobClientOptions);
     }
 
     private static StorageSharedKeyCredential ParseSharedKeyCredential(string connectionString)
