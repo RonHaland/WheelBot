@@ -4,6 +4,7 @@ using SixLabors.ImageSharp.Drawing;
 using SixLabors.ImageSharp.Drawing.Processing;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Numerics;
 using WheelBotApiApp.Services;
@@ -15,6 +16,9 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator, IWheelBaseRen
     private const float MinAngleStep = 0.5f;
     private const int MaxAnimationFrames = 180;
     private const double AnimationFramerate = 24;
+    // Discord often ignores WebP loop metadata and keeps replaying attachments.
+    // A long final-frame duration makes a forced loop look "stopped" on the result.
+    private const int FinalFrameHoldMs = 60_000;
 
     private readonly Color[] _colors = [Color.Red, Color.Orange, Color.Yellow, Color.LimeGreen, Color.LightSkyBlue, Color.MediumPurple];
     private readonly Random _random = new();
@@ -22,6 +26,7 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator, IWheelBaseRen
     private readonly int _size = 420;
     private readonly WheelBaseImageStore _baseImageStore;
     private readonly string _ffmpegPath;
+    private readonly Lazy<byte[]> _pointerRgba;
 
     private DrawingOptions DrawingOptions => new()
     {
@@ -35,6 +40,13 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator, IWheelBaseRen
     {
         _baseImageStore = baseImageStore;
         _ffmpegPath = ResolveFfmpegPath(configuration);
+        _pointerRgba = new Lazy<byte[]>(() =>
+        {
+            using var pointer = MakeSmallTriangle(10);
+            var pixels = new byte[_size * _size * 4];
+            pointer.CopyPixelDataTo(pixels);
+            return pixels;
+        });
         var fontPath = configuration["FontPath"];
         if (Directory.Exists(fontPath))
         {
@@ -196,24 +208,29 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator, IWheelBaseRen
     {
         var sw = Stopwatch.StartNew();
         var baseWheelBytes = await LoadBaseWheelBytesAsync(wheelId, wheel);
-        var pointerBytes = RenderPointerPngBytes();
         var angles = BuildAngleList(rotation);
         Console.WriteLine("Base wheel ready at {0} ms, {1} frames", sw.ElapsedMilliseconds, angles.Count);
 
-        var frameBytes = new byte[angles.Count][];
-        var center = new PointF(_size / 2f, _size / 2f);
+        using var decodedBase = Image.Load<Rgba32>(baseWheelBytes);
+        var baseRgba = new byte[_size * _size * 4];
+        decodedBase.CopyPixelDataTo(baseRgba);
+        var pointerRgba = _pointerRgba.Value;
+        var center = new Vector2(_size / 2f, _size / 2f);
+        var frameRgba = new byte[angles.Count][];
+        var pixelBytes = _size * _size * 4;
+
         Parallel.For(0, angles.Count, new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount }, i =>
         {
-            using var baseWheel = Image.Load<Rgba32>(baseWheelBytes);
-            using var pointer = Image.Load<Rgba32>(pointerBytes);
+            using var baseWheel = Image.LoadPixelData<Rgba32>(baseRgba, _size, _size);
+            using var pointer = Image.LoadPixelData<Rgba32>(pointerRgba, _size, _size);
             using var frame = RenderRotatedFrame(baseWheel, pointer, angles[i], center);
-            using var ms = new MemoryStream();
-            frame.SaveAsPng(ms);
-            frameBytes[i] = ms.ToArray();
+            var rgba = GC.AllocateUninitializedArray<byte>(pixelBytes);
+            frame.CopyPixelDataTo(rgba);
+            frameRgba[i] = rgba;
         });
 
         Console.WriteLine("All frames generated at {0} ms", sw.ElapsedMilliseconds);
-        var webpStream = await EncodeWebpAsync(frameBytes, _ffmpegPath);
+        var webpStream = await EncodeWebpAsync(frameRgba, _size, _size, _ffmpegPath);
         Console.WriteLine("WebP encoded at {0} ms, size: {1}", sw.ElapsedMilliseconds, webpStream.Length);
         sw.Stop();
         webpStream.Position = 0;
@@ -249,17 +266,17 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator, IWheelBaseRen
         return angles;
     }
 
-    private Image<Rgba32> RenderRotatedFrame(Image<Rgba32> baseWheel, Image<Rgba32> pointer, float degrees, PointF center)
+    private Image<Rgba32> RenderRotatedFrame(Image<Rgba32> baseWheel, Image<Rgba32> pointer, float degrees, Vector2 center)
     {
-        var frame = new Image<Rgba32>(_size, _size, Color.Transparent);
-        using var rotatedWheel = baseWheel.Clone(ctx => ctx.Rotate(degrees));
-        var offsetX = (int)(center.X - rotatedWheel.Width / 2f);
-        var offsetY = (int)(center.Y - rotatedWheel.Height / 2f);
-        frame.Mutate(ctx =>
-        {
-            ctx.DrawImage(rotatedWheel, new Point(offsetX, offsetY), 1f);
-            ctx.DrawImage(pointer, new Point(0, 0), 1f);
-        });
+        // Keep destination at wheel size. Rotate() alone expands to the bounding diagonal and is much slower.
+        var matrix = Matrix3x2.CreateRotation(degrees * MathF.PI / 180f, center);
+        var frame = baseWheel.Clone(ctx =>
+            ctx.Transform(
+                new Rectangle(0, 0, _size, _size),
+                matrix,
+                new Size(_size, _size),
+                KnownResamplers.Triangle));
+        frame.Mutate(ctx => ctx.DrawImage(pointer, 1f));
         return frame;
     }
 
@@ -304,18 +321,88 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator, IWheelBaseRen
         return "ffmpeg";
     }
 
-    private static async Task<MemoryStream> EncodeWebpAsync(byte[][] frameBytes, string ffmpegPath)
+    private static async Task<MemoryStream> EncodeWebpAsync(byte[][] frameRgba, int width, int height, string ffmpegPath)
     {
-        var ffmpegResult = await TryEncodeWebpViaFfmpegAsync(frameBytes, ffmpegPath);
-        if (ffmpegResult is not null && IsValidAnimatedWebp(ffmpegResult.ToArray()))
+        var ffmpegResult = await TryEncodeWebpViaFfmpegAsync(frameRgba, width, height, ffmpegPath);
+        if (ffmpegResult is not null && IsValidAnimatedWebp(ffmpegResult))
         {
+            PatchAnimatedWebpPlayback(ffmpegResult, loopCount: 1, lastFrameDurationMs: FinalFrameHoldMs);
             return ffmpegResult;
         }
 
         ffmpegResult?.Dispose();
         Console.WriteLine("ffmpeg WebP output invalid or failed; falling back to img2webp");
 
-        return await EncodeWebpViaImg2WebpAsync(frameBytes);
+        var fallback = await EncodeWebpViaImg2WebpAsync(frameRgba, width, height);
+        PatchAnimatedWebpPlayback(fallback, loopCount: 1, lastFrameDurationMs: FinalFrameHoldMs);
+        return fallback;
+    }
+
+    /// <summary>
+    /// Forces ANIM loop count and last ANMF duration. Loop 0 = infinite, 1 = play once.
+    /// </summary>
+    private static void PatchAnimatedWebpPlayback(MemoryStream stream, ushort loopCount, int lastFrameDurationMs)
+    {
+        byte[] rented = Array.Empty<byte>();
+        Span<byte> data;
+        if (stream.TryGetBuffer(out var segment) && segment.Array is not null)
+        {
+            data = segment.AsSpan(0, (int)stream.Length);
+        }
+        else
+        {
+            rented = stream.ToArray();
+            data = rented;
+        }
+
+        var anim = data.IndexOf("ANIM"u8);
+        if (anim >= 0 && anim + 14 <= data.Length)
+        {
+            BinaryPrimitives.WriteUInt16LittleEndian(data.Slice(anim + 12, 2), loopCount);
+        }
+
+        var lastAnmf = -1;
+        for (var i = 0; i <= data.Length - 4;)
+        {
+            var relative = data.Slice(i).IndexOf("ANMF"u8);
+            if (relative < 0)
+                break;
+
+            lastAnmf = i + relative;
+            if (lastAnmf + 8 > data.Length)
+                break;
+
+            var chunkSize = BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(lastAnmf + 4, 4));
+            i = lastAnmf + 8 + (int)chunkSize;
+            if ((chunkSize & 1) != 0)
+                i++; // RIFF chunk padding
+        }
+
+        if (lastAnmf >= 0 && lastAnmf + 23 <= data.Length)
+        {
+            var duration = Math.Clamp(lastFrameDurationMs, 1, 0xFFFFFF);
+            data[lastAnmf + 20] = (byte)duration;
+            data[lastAnmf + 21] = (byte)(duration >> 8);
+            data[lastAnmf + 22] = (byte)(duration >> 16);
+        }
+
+        if (rented.Length > 0)
+        {
+            stream.SetLength(0);
+            stream.Write(rented);
+        }
+
+        stream.Position = 0;
+    }
+
+    private static bool IsValidAnimatedWebp(MemoryStream stream)
+    {
+        if (!stream.TryGetBuffer(out var segment))
+        {
+            return IsValidAnimatedWebp((ReadOnlySpan<byte>)stream.ToArray());
+        }
+
+        return IsValidAnimatedWebp(segment.AsSpan(0, (int)stream.Length));
     }
 
     private static bool IsValidAnimatedWebp(ReadOnlySpan<byte> data)
@@ -326,16 +413,23 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator, IWheelBaseRen
         return data.IndexOf("ANIM"u8) >= 0 && data.IndexOf("ANMF"u8) >= 0;
     }
 
-    private static async Task<MemoryStream?> TryEncodeWebpViaFfmpegAsync(byte[][] frameBytes, string ffmpegPath)
+    private static async Task<MemoryStream?> TryEncodeWebpViaFfmpegAsync(
+        byte[][] frameRgba,
+        int width,
+        int height,
+        string ffmpegPath)
     {
         var outputStream = new MemoryStream();
         var framerate = AnimationFramerate.ToString(System.Globalization.CultureInfo.InvariantCulture);
         var psi = new ProcessStartInfo
         {
             FileName = ffmpegPath,
+            // Raw RGBA avoids decoding PNGs inside ffmpeg; low compression_level favors speed.
             Arguments =
-                $"-hide_banner -loglevel error -y -f image2pipe -framerate {framerate} -vcodec png -i - " +
-                $"-frames:v {frameBytes.Length} -c:v libwebp_anim -loop 0 -preset picture -q:v 75 -f webp pipe:1",
+                $"-hide_banner -loglevel error -y -f rawvideo -pix_fmt rgba -s {width}x{height} -framerate {framerate} -i - " +
+                // -loop 1 = play once (0 = infinite), same idea as a non-looping GIF.
+                $"-frames:v {frameRgba.Length} -an -c:v libwebp_anim -loop 1 -preset default -compression_level 1 -q:v 70 " +
+                $"-pix_fmt yuva420p -f webp pipe:1",
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -347,7 +441,7 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator, IWheelBaseRen
         if (process is null)
             return null;
 
-        var writeTask = WritePngFramesToStdinAsync(process, frameBytes);
+        var writeTask = WriteRawFramesToStdinAsync(process, frameRgba);
         var readTask = process.StandardOutput.BaseStream.CopyToAsync(outputStream);
         var stderrTask = process.StandardError.ReadToEndAsync();
 
@@ -367,33 +461,40 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator, IWheelBaseRen
         return outputStream;
     }
 
-    private static async Task WritePngFramesToStdinAsync(Process process, byte[][] frameBytes)
+    private static async Task WriteRawFramesToStdinAsync(Process process, byte[][] frameRgba)
     {
         await using var stdin = process.StandardInput.BaseStream;
-        foreach (var frame in frameBytes)
+        foreach (var frame in frameRgba)
         {
             await stdin.WriteAsync(frame);
         }
     }
 
-    private static async Task<MemoryStream> EncodeWebpViaImg2WebpAsync(byte[][] frameBytes)
+    private static async Task<MemoryStream> EncodeWebpViaImg2WebpAsync(byte[][] frameRgba, int width, int height)
     {
         var tempDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"wheelbot-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDir);
 
         try
         {
-            var framePaths = new string[frameBytes.Length];
-            for (var i = 0; i < frameBytes.Length; i++)
+            var framePaths = new string[frameRgba.Length];
+            for (var i = 0; i < frameRgba.Length; i++)
             {
                 framePaths[i] = System.IO.Path.Combine(tempDir, $"frame_{i:D4}.png");
-                await File.WriteAllBytesAsync(framePaths[i], frameBytes[i]);
+                using var image = Image.LoadPixelData<Rgba32>(frameRgba[i], width, height);
+                await image.SaveAsPngAsync(framePaths[i]);
             }
 
             var outputPath = System.IO.Path.Combine(tempDir, "animation.webp");
             var frameDelayMs = Math.Max(1, (int)Math.Round(1000 / AnimationFramerate));
-            var args = new List<string> { "-loop", "0", "-d", frameDelayMs.ToString(), "-o", outputPath };
-            args.AddRange(framePaths);
+            var args = new List<string> { "-loop", "1", "-d", frameDelayMs.ToString() };
+            for (var i = 0; i < framePaths.Length; i++)
+            {
+                if (i == framePaths.Length - 1)
+                    args.AddRange(["-d", FinalFrameHoldMs.ToString()]);
+                args.Add(framePaths[i]);
+            }
+            args.AddRange(["-o", outputPath]);
 
             var psi = new ProcessStartInfo
             {
@@ -458,14 +559,6 @@ public sealed class WheelGeneratorMultiPlatform : IWheelGenerator, IWheelBaseRen
     }
 
     private static double Factor(float x, float fullRotation) => ((fullRotation - (1 / fullRotation) * float.Pow(x, 2)) / fullRotation);
-
-    private byte[] RenderPointerPngBytes()
-    {
-        using var img = MakeSmallTriangle(10);
-        using var stream = new MemoryStream();
-        img.SaveAsPng(stream);
-        return stream.ToArray();
-    }
 
     private Image<Rgba32> MakeSmallTriangle(int height)
     {
